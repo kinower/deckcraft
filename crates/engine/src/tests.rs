@@ -4072,3 +4072,113 @@ fn a_shape_in_front_of_edited_text_takes_the_click() {
     let st = s.doc().unwrap();
     assert!(st.selection.text.as_ref().is_none_or(|t| t.shape.0 as u64 != tb), "the click on the member in front left the text: {:?}", st.selection);
 }
+
+/// A 1×1 PNG inserted at [100, 100, 200, 150]; returns its id.
+fn cropped_picture(s: &mut Session) -> u64 {
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf,
+        0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60,
+        0x82,
+    ];
+    s.prefs.snap_to_grid = false;
+    s.prefs.smart_guides = false;
+    let r = s.execute("insert.picture", &json!({"data": cmd::base64_encode(PNG), "name": "a.png", "rect": [100.0, 100.0, 200.0, 150.0]}));
+    r.unwrap()["id"].as_u64().unwrap()
+}
+
+/// The picture's box (x, y, w, h) and crop.
+fn crop_state(s: &Session, id: u64) -> ([f64; 4], [f64; 4]) {
+    let st = s.doc().unwrap();
+    let sh = st.shapes().iter().find(|sh| sh.id.0 as u64 == id).unwrap();
+    let x = sh.xfrm.unwrap();
+    let deckcraft_model::ShapeKind::Picture { fill } = &sh.kind else { panic!("not a picture") };
+    ([x.x, x.y, x.w, x.h], fill.crop)
+}
+
+fn near(a: [f64; 4], b: [f64; 4]) -> bool {
+    a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6)
+}
+
+#[test]
+fn crop_command_moves_the_box_over_the_picture_like_powerpoint() {
+    let mut s = session();
+    let id = cropped_picture(&mut s);
+    s.execute("picture.crop", &json!({"ids": [id], "left": 0.25, "bottom": 0.2})).unwrap();
+    let (b, c) = crop_state(&s, id);
+    // The picture keeps its size and place: the box loses a quarter on the left, a fifth below.
+    assert!(near(b, [150.0, 100.0, 150.0, 120.0]), "{b:?}");
+    assert!(near(c, [0.25, 0.0, 0.0, 0.2]), "{c:?}");
+    // Resetting the crop brings the whole picture back at the same scale.
+    s.execute("picture.crop", &json!({"ids": [id], "left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0})).unwrap();
+    assert!(near(crop_state(&s, id).0, [100.0, 100.0, 200.0, 150.0]));
+    // keepFrame: the old behaviour, the box stays and the rest stretches into it.
+    s.execute("picture.crop", &json!({"ids": [id], "left": 0.5, "keepFrame": true})).unwrap();
+    assert!(near(crop_state(&s, id).0, [100.0, 100.0, 200.0, 150.0]));
+    assert!(s.execute("picture.crop", &json!({"ids": [id], "left": 0.6, "right": 0.6})).is_err(), "nothing would be left");
+}
+
+#[test]
+fn crop_mode_handles_crop_move_and_scale_the_picture() {
+    let mut s = session();
+    let id = cropped_picture(&mut s);
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
+    let r = s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+    assert_eq!(r["cropping"], id);
+    // The right crop handle, dragged in by 50.
+    let hit = s.pointer(ev(PointerKind::Down, 300.0, 175.0)).unwrap();
+    assert_eq!(hit["hit"]["kind"], "crop");
+    s.pointer(ev(PointerKind::Drag, 250.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 250.0, 175.0)).unwrap();
+    let (b, c) = crop_state(&s, id);
+    assert!(near(b, [100.0, 100.0, 150.0, 150.0]), "{b:?}");
+    assert!(near(c, [0.0, 0.0, 0.25, 0.0]), "{c:?}");
+    assert_eq!(s.tool.crop, Some(deckcraft_model::ShapeId(id as _)), "still cropping");
+    // Drag the picture 20 to the left under the box.
+    s.pointer(ev(PointerKind::Down, 200.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 180.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 180.0, 175.0)).unwrap();
+    let (b, c) = crop_state(&s, id);
+    assert!(near(b, [100.0, 100.0, 150.0, 150.0]), "the box stays: {b:?}");
+    assert!(near(c, [0.1, 0.0, 0.15, 0.0]), "{c:?}");
+    // Scale the picture from its bottom-right corner (now at 280, 250): proportions kept.
+    s.pointer(ev(PointerKind::Down, 280.0, 250.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 380.0, 300.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 380.0, 300.0)).unwrap();
+    let (b, c) = crop_state(&s, id);
+    assert!(near(b, [100.0, 100.0, 150.0, 150.0]), "{b:?}");
+    let img = cmd::crop::image_rect(b[2], b[3], c).unwrap();
+    assert!((img.width() / img.height() - 200.0 / 150.0).abs() < 1e-6, "{img:?}");
+    assert!((img.x0 + 20.0).abs() < 1e-6 && img.y0.abs() < 1e-6, "the far corner stays: {img:?}");
+    // Each gesture is one undo step.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(near(crop_state(&s, id).1, [0.1, 0.0, 0.15, 0.0]));
+    // Escape ends crop mode; so does a click away from the picture.
+    s.key("Escape", Mods::default()).unwrap();
+    assert_eq!(s.tool.crop, None);
+    s.execute("picture.cropMode", &json!({})).unwrap();
+    assert!(s.tool.crop.is_some());
+    s.pointer(ev(PointerKind::Down, 600.0, 500.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 600.0, 500.0)).unwrap();
+    assert_eq!(s.tool.crop, None);
+}
+
+#[test]
+fn crop_aspect_fill_and_fit() {
+    let mut s = session();
+    let id = cropped_picture(&mut s);
+    s.execute("picture.cropAspect", &json!({"ids": [id], "ratio": "1:1"})).unwrap();
+    let (b, _) = crop_state(&s, id);
+    assert!(near(b, [125.0, 100.0, 150.0, 150.0]), "largest square, centred: {b:?}");
+    assert!(s.tool.crop.is_some(), "then into crop mode");
+    // Fit: the whole picture inside the square box; fill: the box covered again.
+    s.execute("picture.cropFill", &json!({"ids": [id], "mode": "fit"})).unwrap();
+    let (b, c) = crop_state(&s, id);
+    let img = cmd::crop::image_rect(b[2], b[3], c).unwrap();
+    assert!((img.width() - 150.0).abs() < 1e-6 && (img.height() - 112.5).abs() < 1e-6, "{img:?}");
+    s.execute("picture.cropFill", &json!({"ids": [id]})).unwrap();
+    let (b, c) = crop_state(&s, id);
+    let img = cmd::crop::image_rect(b[2], b[3], c).unwrap();
+    assert!((img.height() - 150.0).abs() < 1e-6 && (img.width() - 200.0).abs() < 1e-6, "{img:?}");
+    assert!(s.execute("picture.cropAspect", &json!({"ids": [id], "ratio": "wide"})).is_err());
+}

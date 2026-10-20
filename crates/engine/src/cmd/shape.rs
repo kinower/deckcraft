@@ -134,7 +134,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Crop",
             ["Picture Format", "Size"],
             None,
-            "{left?: fraction 0..1, top?: fraction 0..1, right?: fraction 0..1, bottom?: fraction 0..1, ids?}",
+            "{left?: fraction 0..1, top?: fraction 0..1, right?: fraction 0..1, bottom?: fraction 0..1, keepFrame?: bool (default false: the box follows the crop and the picture keeps its size, as in PowerPoint; true: the box stays and the rest stretches into it), ids?}",
             has_selection,
             crop
         ),
@@ -1053,6 +1053,9 @@ fn set_default(s: &mut Session, _p: &Value) -> Result<Value> {
 
 fn crop(s: &mut Session, p: &Value) -> Result<Value> {
     let c = [f64_param(p, "left"), f64_param(p, "top"), f64_param(p, "right"), f64_param(p, "bottom")];
+    if !bool_or(p, "keepFrame", false) {
+        return super::crop::crop_keeping_scale(s, p, c);
+    }
     edit_geometry(s, p, "picture.crop", |sh| {
         if let deckcraft_model::ShapeKind::Picture { fill } = &mut sh.kind {
             for (i, v) in c.iter().enumerate() {
