@@ -4164,6 +4164,46 @@ fn crop_mode_handles_crop_move_and_scale_the_picture() {
 }
 
 #[test]
+fn crop_mode_ends_when_the_picture_stops_being_selected() {
+    let mut s = session();
+    let rect = s.execute("shape.insert", &json!({"preset": "rect", "rect": [400, 300, 50, 50]})).unwrap()["id"].as_u64().unwrap();
+    let id = cropped_picture(&mut s);
+    let pic = deckcraft_model::ShapeId(id as _);
+    let cropping = |s: &Session| s.tool.cropping(s.doc().unwrap());
+    s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+    // Selecting the same picture again keeps crop mode on.
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    s.select(|_, sel| sel.shapes = vec![pic]).unwrap();
+    assert_eq!(s.tool.crop, Some(pic));
+    // Tab moves to the other shape: crop mode is over, and coming back doesn't bring it back.
+    s.key("Tab", Mods::default()).unwrap();
+    assert_ne!(s.doc().unwrap().selection.shapes, vec![pic]);
+    assert_eq!(s.tool.crop, None);
+    for _ in 0..10 {
+        if s.doc().unwrap().selection.shapes == vec![pic] {
+            break;
+        }
+        s.key("Tab", Mods::default()).unwrap();
+    }
+    assert_eq!(s.doc().unwrap().selection.shapes, vec![pic]);
+    assert_eq!(cropping(&s), None);
+    let r = s.key("Enter", Mods::default());
+    assert!(!r.is_ok_and(|v| v["command"] == "picture.cropMode"), "Enter isn't taken by a crop mode that ended");
+    s.execute("edit.deselect", &json!({})).unwrap();
+    // The toggle starts crop mode again rather than turning off a stale one.
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    assert_eq!(s.execute("picture.cropMode", &json!({})).unwrap()["cropping"], id);
+    // Undo takes the picture away (the rectangle is selected again); Redo brings it back
+    // selected, but not in crop mode.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.shapes, vec![deckcraft_model::ShapeId(rect as _)]);
+    assert_eq!(s.tool.crop, None);
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.shapes, vec![pic]);
+    assert_eq!(cropping(&s), None);
+}
+
+#[test]
 fn crop_aspect_fill_and_fit() {
     let mut s = session();
     let id = cropped_picture(&mut s);

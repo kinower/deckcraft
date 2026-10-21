@@ -619,6 +619,7 @@ impl Session {
         if let Some(st) = self.active_mut() {
             clamp_selection(st);
         }
+        self.settle_crop();
         if let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
             && st.uid == uid
             && !Arc::ptr_eq(&old, &st.doc)
@@ -681,6 +682,7 @@ impl Session {
         if st.composition.is_some() && owner(&st.selection) != before {
             self.end_composition();
         }
+        self.settle_crop();
         Ok(())
     }
 }

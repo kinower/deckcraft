@@ -57,6 +57,7 @@ impl Session {
         if self.tool.drawing_freeform() && matches!(k, "enter" | "return" | "escape") {
             return self.finish_freeform(false);
         }
+        self.settle_crop();
         if self.tool.crop.is_some() && matches!(k, "enter" | "return" | "escape") {
             self.tool.crop = None;
             return Ok(json!({"handled": true, "command": "picture.cropMode"}));

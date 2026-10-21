@@ -388,6 +388,15 @@ fn set_warp_adj(sh: &mut Shape, name: &str, base: &[f64], index: usize, value: f
 }
 
 impl Session {
+    /// End crop mode once its picture is no longer the one selected shape (Tab, a slide change,
+    /// Undo…), so its handles don't come back when the picture is selected again. Reselecting the
+    /// same picture keeps crop mode on.
+    pub(crate) fn settle_crop(&mut self) {
+        if self.tool.crop.is_some() && self.active().is_none_or(|st| self.tool.cropping(st).is_none()) {
+            self.tool.crop = None;
+        }
+    }
+
     pub fn set_tool(&mut self, kind: ToolKind) {
         self.tool.kind = kind;
         self.tool.drag = None;
@@ -513,6 +522,7 @@ impl Session {
         if !matches!(ev.kind, PointerKind::Move) {
             self.end_composition();
         }
+        self.settle_crop();
         match ev.kind {
             PointerKind::Move => {
                 if let Some(Drag::Freeform { points, mode, .. }) = &self.tool.drag {
