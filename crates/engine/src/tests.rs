@@ -4204,6 +4204,31 @@ fn crop_mode_ends_when_the_picture_stops_being_selected() {
 }
 
 #[test]
+fn crop_mode_ends_when_another_presentation_becomes_active() {
+    let mut s = session();
+    let id = cropped_picture(&mut s);
+    let pic = deckcraft_model::ShapeId(id as _);
+    s.execute("file.new", &json!({})).unwrap();
+    s.set_active(0);
+    s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+    // Activating the presentation that is already active keeps crop mode on.
+    s.set_active(0);
+    assert_eq!(s.tool.crop, Some(pic));
+    // A → B ends it; back in A the picture is still selected, but not in crop mode.
+    s.set_active(1);
+    assert_eq!(s.tool.crop, None);
+    s.set_active(0);
+    assert_eq!(s.doc().unwrap().selection.shapes, vec![pic]);
+    assert_eq!(s.tool.cropping(s.doc().unwrap()), None);
+    // Closing another presentation keeps it; closing this one ends it.
+    s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+    s.close_document(1);
+    assert_eq!(s.tool.crop, Some(pic));
+    s.close_document(0);
+    assert_eq!(s.tool.crop, None);
+}
+
+#[test]
 fn crop_aspect_fill_and_fit() {
     let mut s = session();
     let id = cropped_picture(&mut s);

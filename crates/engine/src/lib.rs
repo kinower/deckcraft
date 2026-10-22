@@ -554,22 +554,39 @@ impl Session {
     }
     pub fn set_active(&mut self, i: usize) {
         if i < self.docs.len() {
+            let before = self.active_uid();
             self.active = Some(i);
+            self.document_changed(before);
         }
     }
     pub fn add_document(&mut self, d: DocState) -> usize {
+        let before = self.active_uid();
         self.docs.push(d);
         self.active = Some(self.docs.len() - 1);
+        self.document_changed(before);
         self.docs.len() - 1
     }
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
+            let before = self.active_uid();
             let d = self.docs.remove(i);
             if let Some(dir) = &self.recovery_dir {
                 recovery::discard(dir, d.uid);
             }
             self.active = if self.docs.is_empty() { None } else { Some(i.min(self.docs.len() - 1)) };
+            self.document_changed(before);
         }
+    }
+    fn active_uid(&self) -> Option<u64> {
+        self.active().map(|d| d.uid)
+    }
+    /// Crop mode belongs to a picture in one presentation: another one becoming active ends it,
+    /// so coming back doesn't bring it back.
+    fn document_changed(&mut self, before: Option<u64>) {
+        if self.active_uid() != before {
+            self.tool.crop = None;
+        }
+        self.settle_crop();
     }
     pub fn next_untitled(&mut self) -> String {
         self.untitled += 1;
