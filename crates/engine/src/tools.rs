@@ -397,6 +397,16 @@ impl Session {
         }
     }
 
+    /// Finish a crop gesture in the presentation it began in, as releasing the pointer does,
+    /// before another presentation becomes active or this one closes: one undo step there, and
+    /// later pointer events can't carry it into another presentation.
+    pub(crate) fn end_crop_drag(&mut self) {
+        if matches!(self.tool.drag, Some(Drag::Crop { .. })) {
+            self.tool.drag = None;
+            self.commit_named("Crop");
+        }
+    }
+
     pub fn set_tool(&mut self, kind: ToolKind) {
         self.tool.kind = kind;
         self.tool.drag = None;

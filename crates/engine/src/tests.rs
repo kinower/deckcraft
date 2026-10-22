@@ -4229,6 +4229,34 @@ fn crop_mode_ends_when_another_presentation_becomes_active() {
 }
 
 #[test]
+fn a_crop_drag_ends_in_its_own_presentation_when_another_becomes_active() {
+    let mut s = session();
+    let id = cropped_picture(&mut s);
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
+    s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+    let undo_before = s.doc().unwrap().history.undo.len();
+    // Halfway through dragging the right crop handle in, a new presentation opens.
+    s.pointer(ev(PointerKind::Down, 300.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 250.0, 175.0)).unwrap();
+    s.execute("file.new", &json!({})).unwrap();
+    assert!(!s.tool.dragging() && s.tool.crop.is_none());
+    let b = s.doc().unwrap().doc.clone();
+    s.pointer(ev(PointerKind::Drag, 200.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 200.0, 175.0)).unwrap();
+    let st = s.doc().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&b, &st.doc) && st.history.undo.is_empty(), "the new presentation is untouched");
+    // The first presentation kept the crop so far as one finished undo step.
+    s.set_active(0);
+    let st = s.doc().unwrap();
+    assert!(st.interaction.is_none());
+    assert_eq!(st.history.undo.len(), undo_before + 1);
+    assert_eq!(st.history.undo.last().unwrap().label, "Crop");
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.25, 0.0]));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.0, 0.0]));
+}
+
+#[test]
 fn crop_aspect_fill_and_fit() {
     let mut s = session();
     let id = cropped_picture(&mut s);

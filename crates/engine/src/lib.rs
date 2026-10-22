@@ -555,12 +555,16 @@ impl Session {
     pub fn set_active(&mut self, i: usize) {
         if i < self.docs.len() {
             let before = self.active_uid();
+            if before != self.docs.get(i).map(|d| d.uid) {
+                self.end_crop_drag();
+            }
             self.active = Some(i);
             self.document_changed(before);
         }
     }
     pub fn add_document(&mut self, d: DocState) -> usize {
         let before = self.active_uid();
+        self.end_crop_drag();
         self.docs.push(d);
         self.active = Some(self.docs.len() - 1);
         self.document_changed(before);
@@ -569,6 +573,9 @@ impl Session {
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
             let before = self.active_uid();
+            if self.active == Some(i) {
+                self.end_crop_drag();
+            }
             let d = self.docs.remove(i);
             if let Some(dir) = &self.recovery_dir {
                 recovery::discard(dir, d.uid);
