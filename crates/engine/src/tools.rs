@@ -329,6 +329,13 @@ impl ToolState {
         })
     }
 
+    /// Forget a crop drag without finishing it: its presentation is no longer the active one.
+    pub(crate) fn drop_crop_drag(&mut self) {
+        if matches!(self.drag, Some(Drag::Crop { .. })) {
+            self.drag = None;
+        }
+    }
+
     /// A freeform path is being drawn (Enter/Escape/double-click finish it).
     pub fn drawing_freeform(&self) -> bool {
         matches!(self.drag, Some(Drag::Freeform { .. }))

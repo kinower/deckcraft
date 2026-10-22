@@ -4257,6 +4257,46 @@ fn a_crop_drag_ends_in_its_own_presentation_when_another_becomes_active() {
 }
 
 #[test]
+fn a_crop_drag_ends_when_closing_another_presentation_changes_the_active_one() {
+    let mut s = session();
+    let id = cropped_picture(&mut s);
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
+    let uid = |s: &Session| s.doc().unwrap().uid;
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("file.new", &json!({})).unwrap();
+    s.set_active(0);
+    let a = uid(&s);
+    let undo_before = s.doc().unwrap().history.undo.len();
+    s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+    s.pointer(ev(PointerKind::Down, 300.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 250.0, 175.0)).unwrap();
+    // Closing B (index 1) while A is active makes C, which takes index 1, the active one.
+    s.close_document(1);
+    assert_ne!(uid(&s), a);
+    assert!(!s.tool.dragging() && s.tool.crop.is_none());
+    let c = s.doc().unwrap().doc.clone();
+    s.pointer(ev(PointerKind::Drag, 200.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 200.0, 175.0)).unwrap();
+    let st = s.doc().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&c, &st.doc) && st.history.undo.is_empty(), "C is untouched");
+    s.set_active(0);
+    let st = s.doc().unwrap();
+    assert!(st.interaction.is_none());
+    assert_eq!(st.history.undo.len(), undo_before + 1);
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.25, 0.0]));
+    // Closing C (index 1) leaves A active: the drag goes on and finishes on release.
+    s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+    s.pointer(ev(PointerKind::Down, 250.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 225.0, 175.0)).unwrap();
+    s.close_document(1);
+    assert_eq!(uid(&s), a);
+    assert!(s.tool.dragging());
+    s.pointer(ev(PointerKind::Up, 225.0, 175.0)).unwrap();
+    assert_eq!(s.doc().unwrap().history.undo.len(), undo_before + 2);
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.375, 0.0]));
+}
+
+#[test]
 fn crop_aspect_fill_and_fit() {
     let mut s = session();
     let id = cropped_picture(&mut s);

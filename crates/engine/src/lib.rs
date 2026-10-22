@@ -573,7 +573,10 @@ impl Session {
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
             let before = self.active_uid();
-            if self.active == Some(i) {
+            // The presentation that takes index `i` (or the last one) becomes active, even when
+            // `i` wasn't: a crop drag ends wherever the active presentation changes.
+            let next = self.docs.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, d)| d.uid).nth(i.min(self.docs.len().saturating_sub(2)));
+            if next != before {
                 self.end_crop_drag();
             }
             let d = self.docs.remove(i);
@@ -592,6 +595,7 @@ impl Session {
     fn document_changed(&mut self, before: Option<u64>) {
         if self.active_uid() != before {
             self.tool.crop = None;
+            self.tool.drop_crop_drag();
         }
         self.settle_crop();
     }
