@@ -4297,6 +4297,61 @@ fn a_crop_drag_ends_when_closing_another_presentation_changes_the_active_one() {
 }
 
 #[test]
+fn every_way_out_of_a_crop_gesture_leaves_it_as_one_undo_step() {
+    let mut s = session();
+    let rect = s.execute("shape.insert", &json!({"preset": "rect", "rect": [400, 300, 50, 50]})).unwrap()["id"].as_u64().unwrap();
+    let id = cropped_picture(&mut s);
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
+    let undos = |s: &Session| s.doc().unwrap().history.undo.len();
+    let ended = |s: &Session| !s.tool.dragging() && s.doc().unwrap().interaction.is_none();
+    // Selecting another shape mid-gesture: crop mode ends and the gesture is its own step.
+    s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+    let n = undos(&s);
+    s.pointer(ev(PointerKind::Down, 300.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 250.0, 175.0)).unwrap();
+    s.execute("edit.select", &json!({"ids": [rect]})).unwrap();
+    assert!(ended(&s) && s.tool.crop.is_none());
+    assert_eq!(undos(&s), n + 1);
+    s.pointer(ev(PointerKind::Drag, 200.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 200.0, 175.0)).unwrap();
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.25, 0.0]), "later events change nothing");
+    assert_eq!(undos(&s), n + 1);
+    // Another tool mid-gesture: the same, and crop mode stays on.
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    s.execute("picture.cropMode", &json!({})).unwrap();
+    s.pointer(ev(PointerKind::Down, 250.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 225.0, 175.0)).unwrap();
+    s.set_tool(ToolKind::Select);
+    assert!(ended(&s));
+    assert_eq!(undos(&s), n + 2);
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.375, 0.0]));
+    // Undo mid-gesture takes back exactly that gesture; Redo brings it back.
+    s.pointer(ev(PointerKind::Down, 225.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 200.0, 175.0)).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(ended(&s));
+    assert_eq!(undos(&s), n + 2);
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.375, 0.0]));
+    s.pointer(ev(PointerKind::Drag, 150.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 150.0, 175.0)).unwrap();
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.375, 0.0]));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert!(near(crop_state(&s, id).1, [0.0, 0.0, 0.5, 0.0]));
+    // Panning the picture off the box stores the crop the renderer draws.
+    assert_eq!(s.tool.crop, Some(deckcraft_model::ShapeId(id as _)));
+    s.pointer(ev(PointerKind::Down, 150.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 550.0, 175.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 550.0, 175.0)).unwrap();
+    let c = crop_state(&s, id).1;
+    assert!(c.iter().all(|v| (-10.0..=0.99).contains(v)) && c[2] == 0.99, "{c:?}");
+    // keepFrame can't crop the whole picture away either.
+    assert!(s.execute("picture.crop", &json!({"ids": [id], "left": 0.6, "right": 0.6, "keepFrame": true})).is_err());
+    // Crop mode needs exactly one picture selected.
+    s.execute("edit.select", &json!({"ids": [id, rect]})).unwrap();
+    assert!(s.execute("picture.cropMode", &json!({})).is_err());
+}
+
+#[test]
 fn crop_aspect_fill_and_fit() {
     let mut s = session();
     let id = cropped_picture(&mut s);

@@ -400,13 +400,20 @@ impl Session {
     /// same picture keeps crop mode on.
     pub(crate) fn settle_crop(&mut self) {
         if self.tool.crop.is_some() && self.active().is_none_or(|st| self.tool.cropping(st).is_none()) {
-            self.tool.crop = None;
+            self.exit_crop();
         }
     }
 
-    /// Finish a crop gesture in the presentation it began in, as releasing the pointer does,
-    /// before another presentation becomes active or this one closes: one undo step there, and
-    /// later pointer events can't carry it into another presentation.
+    /// Leave crop mode. A crop gesture still in progress is finished first, as its own undo step.
+    /// Every way out of crop mode comes through here.
+    pub(crate) fn exit_crop(&mut self) {
+        self.end_crop_drag();
+        self.tool.crop = None;
+    }
+
+    /// Finish a crop gesture in the presentation it began in, as releasing the pointer does:
+    /// one undo step there, and later pointer events can't carry it on. Called wherever the
+    /// gesture can be cut short (leaving crop mode, Undo/Redo, another tool, another presentation).
     pub(crate) fn end_crop_drag(&mut self) {
         if matches!(self.tool.drag, Some(Drag::Crop { .. })) {
             self.tool.drag = None;
@@ -415,6 +422,7 @@ impl Session {
     }
 
     pub fn set_tool(&mut self, kind: ToolKind) {
+        self.end_crop_drag();
         self.tool.kind = kind;
         self.tool.drag = None;
         self.tool.preview = None;
@@ -671,7 +679,7 @@ impl Session {
                 self.tool.drag = Some(Drag::Crop { id: cid, part, orig, img, start: p });
                 return Ok(json!({"hit": serde_json::to_value(&hit).unwrap_or_default()}));
             }
-            self.tool.crop = None;
+            self.exit_crop();
         }
         // Edit Points: drag a vertex, Ctrl-click one to delete it or the outline to add one;
         // a click anywhere else leaves Edit Points.
@@ -904,7 +912,8 @@ impl Session {
                         (orig, cmd::crop::crop_of(orig.w, orig.h, img + d))
                     }
                 };
-                if let Some(c) = nc {
+                // Stored as the renderer draws it, so the next gesture starts from what is shown.
+                if let Some(c) = nc.map(|c| c.map(|v| v.clamp(-10.0, 0.99))) {
                     cmd::crop::store(self, "crop", &[(id, Some(nx), c)])?;
                 }
             }

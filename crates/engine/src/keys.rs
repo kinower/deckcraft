@@ -59,7 +59,7 @@ impl Session {
         }
         self.settle_crop();
         if self.tool.crop.is_some() && matches!(k, "enter" | "return" | "escape") {
-            self.tool.crop = None;
+            self.exit_crop();
             return Ok(json!({"handled": true, "command": "picture.cropMode"}));
         }
         if self.tool.edit_points.is_some() && matches!(k, "enter" | "return" | "escape") {

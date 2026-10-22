@@ -27,7 +27,7 @@ pub fn specs() -> Vec<CommandSpec> {
             ["Picture Format", "Size", "Crop"],
             None,
             "{on?: bool (default: toggle), id?} — show the crop handles on one selected picture: drag them to crop, drag the picture to move it inside, its round handles to scale it; Enter, Escape or a click elsewhere ends",
-            has_picture,
+            has_one_picture,
             crop_mode
         ),
         cmd!(
@@ -55,6 +55,13 @@ pub fn has_picture(s: &Session) -> std::result::Result<(), String> {
     has_selection(s)?;
     let any = s.active().is_some_and(|d| d.selected_shapes().iter().any(|sh| matches!(sh.kind, ShapeKind::Picture { .. })));
     if any { Ok(()) } else { Err("select a picture".into()) }
+}
+
+/// Crop mode works on one picture: with anything else selected too it is off.
+pub fn has_one_picture(s: &Session) -> std::result::Result<(), String> {
+    has_selection(s)?;
+    let one = s.active().is_some_and(|d| matches!(d.selected_shapes().as_slice(), [sh] if matches!(sh.kind, ShapeKind::Picture { .. })));
+    if one { Ok(()) } else { Err("select one picture".into()) }
 }
 
 /// The whole image in the box's local points (`w`×`h` box, `crop` = left, top, right, bottom).
@@ -197,7 +204,7 @@ fn crop_target(s: &Session, p: &Value, cmd: &str) -> Result<ShapeId> {
 fn crop_mode(s: &mut Session, p: &Value) -> Result<Value> {
     let on = p.get("on").and_then(Value::as_bool).unwrap_or(s.tool.crop.is_none());
     if !on {
-        s.tool.crop = None;
+        s.exit_crop();
         return Ok(json!({"cropping": Value::Null}));
     }
     let id = crop_target(s, p, "picture.cropMode")?;
