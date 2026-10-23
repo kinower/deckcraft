@@ -388,10 +388,10 @@ fn fit(avail: Rect, doc: &Presentation) -> Rect {
 /// A transition layer as an egui mesh: [`deckcraft_anim::layer_mesh`]'s triangles (perspective
 /// cards subdivided so their pictures stay straight) with per-vertex opacity.
 /// Where presenter view's "Next" preview goes: the column's width below its label, kept inside
-/// the top 60% of the column. A portrait slide used to get the full width and a height many
-/// times the window (a white slab over the notes and past the window edge).
+/// the column. A portrait slide used to get the full width and a height many times the window
+/// (a white slab over the notes and past the window edge).
 fn next_rect(right: Rect, doc: &Presentation) -> Rect {
-    let area = Rect::from_min_max(right.min + vec2(0.0, 22.0), pos2(right.max.x, right.min.y + 22.0 + (right.height() - 22.0).max(0.0) * 0.6));
+    let area = Rect::from_min_max(right.min + vec2(0.0, 22.0), pos2(right.max.x, right.max.y.max(right.min.y + 22.0)));
     Rect::from_min_size(area.min, fit(area, doc).size())
 }
 
@@ -1938,10 +1938,12 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, di
                     }
                 });
                 ui.add_space(8.0);
+                // The current and next slides side by side on top, the notes across the bottom.
                 let avail = ui.available_rect_before_wrap();
-                let left = Rect::from_min_max(avail.min, pos2(avail.min.x + avail.width() * 0.62, avail.max.y));
-                let right = Rect::from_min_max(pos2(left.max.x + 16.0, avail.min.y), avail.max);
-                let cr = fit(Rect::from_min_max(left.min, pos2(left.max.x, left.min.y + left.height() * 0.8)), doc);
+                let top = avail.min.y + avail.height() * 0.62;
+                let left = Rect::from_min_max(avail.min, pos2(avail.min.x + avail.width() * 0.62, top));
+                let right = Rect::from_min_max(pos2(left.max.x + 16.0, avail.min.y), pos2(avail.max.x, top));
+                let cr = fit(left, doc);
                 let cr = Rect::from_min_size(left.min, cr.size());
                 if let Some(t) = &cur_tex {
                     ui.painter().image(t.id(), cr, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
@@ -1975,24 +1977,26 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, di
                         ui.painter().text(nr.center(), Align2::CENTER_CENTER, "End of slide show", theme::font(13.0), Color32::from_gray(170));
                     }
                 }
-                let notes_head = Rect::from_min_size(pos2(right.min.x, nr.max.y + 12.0), vec2(right.width(), 28.0));
+                let notes_head = Rect::from_min_size(pos2(avail.min.x, cr.max.y.max(nr.max.y) + 12.0), vec2(avail.width(), 32.0));
                 let mut head = ui.new_child(egui::UiBuilder::new().max_rect(notes_head));
                 head.horizontal(|ui| {
                     ui.label(egui::RichText::new("Notes").size(13.0).color(Color32::from_gray(170)));
-                    if ui.button("A-").clicked() {
+                    if button(ui, "A-").clicked() {
                         show.nudge_notes(-NOTES_STEP);
                     }
                     ui.label(egui::RichText::new(format!("{}", show.notes_px as i32)).size(13.0).color(Color32::from_gray(200)));
-                    if ui.button("A+").clicked() {
+                    if button(ui, "A+").clicked() {
                         show.nudge_notes(NOTES_STEP);
                     }
                 });
-                let notes_rect = Rect::from_min_max(pos2(right.min.x, notes_head.max.y + 4.0), right.max);
-                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect));
+                // Black on white, like a printed page, for reading at a glance.
+                let notes_rect = Rect::from_min_max(pos2(avail.min.x, notes_head.max.y + 4.0), avail.max);
+                ui.painter().rect_filled(notes_rect, CornerRadius::same(4), Color32::WHITE);
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect.shrink(12.0)));
                 egui::ScrollArea::vertical().show(&mut child, |ui| {
-                    ui.label(
-                        egui::RichText::new(if notes.is_empty() { "No notes." } else { &notes }).size(show.notes_px).color(Color32::from_gray(230)),
-                    );
+                    ui.set_width(ui.available_width());
+                    let (text, color) = if notes.is_empty() { ("No notes.", Color32::from_gray(120)) } else { (notes.as_str(), Color32::BLACK) };
+                    ui.label(egui::RichText::new(text).size(show.notes_px).color(color));
                 });
             });
             if ui.input(|i| i.viewport().close_requested()) {
