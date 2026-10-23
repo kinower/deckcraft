@@ -33,6 +33,9 @@ impl Display {
 
 /// Room kept around a window placed on a display, in physical pixels (title bar, taskbar).
 const MARGIN: i32 = 40;
+/// A window's title bar height, and how much of its width must show to grab it (physical pixels).
+const TITLE_BAR: i32 = 32;
+const GRAB: i32 = 160;
 
 /// The displays, and the one the editor window is on.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -56,15 +59,23 @@ impl Displays {
     /// The display offered first when the show asks where to go: the one chosen last time while
     /// it is still there, else the editor's.
     pub fn first_choice(&self, last: Option<usize>) -> usize {
-        last.or(self.editor).filter(|&i| i < self.list.len()).unwrap_or(0)
+        let valid = |i: &usize| *i < self.list.len();
+        last.filter(valid).or(self.editor.filter(valid)).unwrap_or(0)
     }
 
-    /// Where Presenter View's window opens: where it was left (`saved`) while that is on a display,
-    /// even the show's (it stays on top); else centred on a display other than the show's when
-    /// there is one, with the saved size or `size`. `None` leaves it to the system.
+    /// Can the window at `r` still be grabbed: is enough of its title bar on one display?
+    fn reachable(&self, r: [i32; 4]) -> bool {
+        let bar = [r[0], r[1], r[2], TITLE_BAR];
+        self.list.iter().any(|d| d.overlap(bar) >= i64::from(GRAB.min(r[2])) * i64::from(TITLE_BAR))
+    }
+
+    /// Where Presenter View's window opens: where it was left (`saved`) while its title bar can
+    /// still be grabbed, even over the show (it stays on top); else (a display gone, a resolution
+    /// changed) centred on a display other than the show's when there is one, with the saved size
+    /// or `size`. `None` leaves it to the system.
     pub fn presenter(&self, saved: Option<[i32; 4]>, show: Option<usize>, size: [i32; 2]) -> Option<[i32; 4]> {
         let saved = saved.filter(|r| r[2] > 0 && r[3] > 0);
-        if self.list.is_empty() || saved.is_some_and(|r| self.under(r).is_some()) {
+        if self.list.is_empty() || saved.is_some_and(|r| self.reachable(r)) {
             return saved;
         }
         let d = self.other(show).unwrap_or(0);
@@ -100,7 +111,9 @@ mod tests {
         assert_eq!(d.first_choice(Some(1)), 1);
         d.editor = Some(1);
         assert_eq!(d.first_choice(None), 1);
-        // A display that has gone.
+        // A display that has gone: the editor's.
+        assert_eq!(d.first_choice(Some(5)), 1);
+        d.editor = Some(7);
         assert_eq!(d.first_choice(Some(5)), 0);
         assert_eq!(Displays::default().first_choice(Some(3)), 0);
     }
@@ -115,6 +128,12 @@ mod tests {
         // Nothing saved, or saved on a display that is gone: centred on another display.
         assert_eq!(d.presenter(None, Some(1), [1100, 700]), Some([410, 190, 1100, 700]));
         assert_eq!(d.presenter(Some([-3000, 0, 800, 500]), Some(1), [1100, 700]), Some([560, 290, 800, 500]));
+        // Left almost off screen after a resolution change, or with its title bar above the top:
+        // it can't be grabbed, so it is centred again.
+        assert_eq!(d.presenter(Some([3199, 100, 900, 600]), Some(1), [1100, 700]), Some([510, 240, 900, 600]));
+        assert_eq!(d.presenter(Some([100, -200, 900, 600]), Some(1), [1100, 700]), Some([510, 240, 900, 600]));
+        // Enough of its title bar shows: it stays where it is.
+        assert_eq!(d.presenter(Some([1700, 100, 900, 600]), Some(1), [1100, 700]), Some([1700, 100, 900, 600]));
         // Larger than the display: shrunk to fit.
         assert_eq!(d.presenter(None, Some(0), [4000, 3000]), Some([1960, 40, 1200, 640]));
     }
