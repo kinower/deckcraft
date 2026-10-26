@@ -93,6 +93,38 @@ mod tests {
     }
 
     #[test]
+    fn system_clipboard_colliding_shape_ids_keep_position_including_paste_as_picture() {
+        for picture in [false, true] {
+            for foreign in [false, true] {
+                let mut src = Session::with_new();
+                src.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 120, 200, 80]})).unwrap();
+                src.execute("edit.copy", &json!({})).unwrap();
+                let mut dst = Session::with_new();
+                dst.execute("shape.insert", &json!({"preset": "rect", "rect": [300, 320, 40, 40]})).unwrap();
+                let source_id = src.clipboard.shapes[0].id;
+                assert!(dst.doc().unwrap().shape(source_id).is_some());
+                let bytes = src.clipboard.to_system_bytes().unwrap();
+                dst.clipboard = if foreign { Clipboard::from_system_bytes(&bytes).unwrap() } else { src.clipboard.clone() };
+                let off = if foreign { 0.0 } else { dst.prefs.duplicate_offset };
+                if picture {
+                    dst.execute("edit.pasteSpecial", &json!({"as": "picture"})).unwrap();
+                } else {
+                    let params = if foreign { json!({"clipboard": base64_encode(&bytes)}) } else { json!({}) };
+                    dst.execute("edit.paste", &params).unwrap();
+                }
+                let st = dst.doc().unwrap();
+                let pasted = st.shape(st.selection.shapes[0]).unwrap();
+                assert_ne!(pasted.id, source_id);
+                let x = pasted.xfrm.unwrap();
+                // Picture rendering includes an 8 pt margin around the original shape.
+                let margin = if picture { 8.0 } else { 0.0 };
+                assert!((x.x - (100.0 - margin + off)).abs() < 0.01, "picture={picture}, foreign={foreign}: {x:?}");
+                assert!((x.y - (120.0 - margin + off)).abs() < 0.01, "picture={picture}, foreign={foreign}: {x:?}");
+            }
+        }
+    }
+
+    #[test]
     fn system_clipboard_slides_reuse_destination_layout_without_importing_masters() {
         let mut src = Session::with_new();
         src.execute("edit.copy", &json!({"scope": "slides"})).unwrap();

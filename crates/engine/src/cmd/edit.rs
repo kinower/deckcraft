@@ -17,8 +17,8 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(noundo "edit.undo", "Undo", ["Edit"], Some("Cmd+Z"), "{}", can_undo, undo),
         cmd!(noundo "edit.redo", "Redo", ["Edit"], Some("Cmd+Y"), "{}", can_redo, redo),
-        cmd!("edit.cut", "Cut", ["Home", "Clipboard"], Some("Cmd+X"), "{scope?: slides} → {text, html?}", has_doc, cut),
-        cmd!(noundo "edit.copy", "Copy", ["Home", "Clipboard"], Some("Cmd+C"), "{scope?: slides} → {text, html?}", has_doc, copy),
+        cmd!("edit.cut", "Cut", ["Home", "Clipboard"], Some("Cmd+X"), "{scope?: slides} → {text, html?, copied}", has_doc, cut),
+        cmd!(noundo "edit.copy", "Copy", ["Home", "Clipboard"], Some("Cmd+C"), "{scope?: slides} → {text, html?, copied}", has_doc, copy),
         cmd!(
             "edit.paste",
             "Paste",
@@ -327,7 +327,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         s.clipboard.pastes += 1;
         let off = s.prefs.duplicate_offset * s.clipboard.pastes as f64;
         // Pasting on another slide keeps the position; on the same slide it offsets.
-        let same_slide = s.doc().ok().is_some_and(|d| clip.shapes.iter().any(|c| d.shape(c.id).is_some()));
+        let same_slide = !clip.foreign && s.doc().ok().is_some_and(|d| clip.shapes.iter().any(|c| d.shape(c.id).is_some()));
         let off = if same_slide { off } else { 0.0 };
         return s.edit(|doc, sel| {
             let media = bring_media("edit.paste", doc, &clip.media)?;
@@ -510,7 +510,7 @@ fn paste_picture(s: &mut Session) -> Result<Value> {
     let img = deckcraft_render::render_shape(&doc, &slide, gid, SCALE).ok_or_else(|| bad("edit.pasteSpecial", "the shapes could not be drawn"))?;
     // render_shape draws the bounds plus an 8 pt margin (room for shadows and outlines).
     let (w, h) = (img.width as f64 / SCALE, img.height as f64 / SCALE);
-    let same_slide = clip.shapes.iter().any(|c| st.shape(c.id).is_some());
+    let same_slide = !clip.foreign && clip.shapes.iter().any(|c| st.shape(c.id).is_some());
     let off = if same_slide { s.prefs.duplicate_offset } else { 0.0 };
     let png = img.to_png();
     s.execute("insert.picture", &json!({"data": base64_encode(&png), "name": "Picture.png", "rect": [b.x0 - 8.0 + off, b.y0 - 8.0 + off, w, h]}))
