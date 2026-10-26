@@ -910,7 +910,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     show.observe_visible_frame(now, web_time::Instant::now());
     if !show.started {
-        // Use the display selected in Preferences, falling back when it was disconnected.
+        // Use the display selected in Set Up Slide Show, falling back when it was disconnected.
         if show_fills_screen(show.reading, &doc.show.show_type) && show.presenter && app.displays.list.len() > 1 {
             show.display = Some(app.displays.first_choice(app.ui.show_display));
         }
@@ -2811,9 +2811,9 @@ mod tests {
         assert!(!harness.state().2, "Escape from Presenter View ends the show");
     }
 
-    /// Preferences selects the display; starting and restarting a show never asks again.
+    /// Set Up Slide Show selects the display; starting and restarting a show never asks again.
     #[test]
-    fn the_show_uses_the_display_saved_in_preferences_without_asking() {
+    fn the_show_uses_the_saved_display_without_asking() {
         use crate::displays::{Display, Displays};
         use egui_kittest::kittest::Queryable;
 
@@ -2902,8 +2902,9 @@ mod tests {
     }
 
     #[test]
-    fn preferences_display_selection_can_be_cancelled_or_saved() {
+    fn setup_show_display_selection_can_be_cancelled_or_saved() {
         use crate::displays::{Display, Displays};
+        use egui_kittest::kittest::NodeT;
         use egui_kittest::kittest::Queryable;
 
         let mut app = SlideApp::new(deckcraft_engine::Session::with_new(), crate::Services::default());
@@ -2916,14 +2917,14 @@ mod tests {
             app,
         );
         h.run_steps(3);
-        for close in ["Cancel", "Escape", "Done"] {
-            h.state_mut().run("app.preferences", json!({})).unwrap();
+        for close in ["Cancel", "Escape", "OK"] {
+            h.state_mut().run("app.dialog", json!({"id": "setupShow"})).unwrap();
             h.run_steps(2);
-            h.get_by_label("Slide show display").click_accesskit();
+            h.get_by_label("Slide show monitor").click_accesskit();
             h.run_steps(2);
             h.get_by_label("Display 2 (1280 × 720)").click_accesskit();
             h.run_steps(2);
-            assert_eq!(h.state().ui.show_display, Some(1));
+            assert_eq!(h.state().ui.show_display, None, "selection stays pending until OK");
             if close == "Escape" {
                 h.key_press(egui::Key::Escape);
             } else {
@@ -2931,8 +2932,30 @@ mod tests {
             }
             h.run_steps(2);
             assert!(h.state().dialog.is_none());
-            assert_eq!(h.state().ui.show_display, if close == "Done" { Some(1) } else { None });
+            assert_eq!(h.state().ui.show_display, if close == "OK" { Some(1) } else { None });
         }
+        let saved = serde_json::to_value(&h.state().ui).unwrap();
+        assert_eq!(saved["showDisplay"], json!(1));
+        let restored: crate::UiState = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.show_display, Some(1));
+        h.state_mut().start_show(0, false);
+        h.run_steps(2);
+        assert!(h.state().show.as_ref().unwrap().started);
+        assert_eq!(h.state().show.as_ref().unwrap().display, Some(1));
+        assert!(h.query_by_label_contains("Which display").is_none());
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        h.state_mut().run("app.dialog", json!({"id": "setupShow"})).unwrap();
+        h.run_steps(2);
+        h.get_by_label("Browsed by an individual (window)").click_accesskit();
+        h.run_steps(2);
+        assert!(h.get_by_label("Slide show monitor").accesskit_node().is_disabled());
+        h.get_by_label("OK").click_accesskit();
+        h.run_steps(2);
+        assert_eq!(h.state().ui.show_display, Some(1));
+        h.state_mut().start_show(0, false);
+        h.run_steps(2);
+        assert_eq!(h.state().show.as_ref().unwrap().display, None);
     }
 
     #[test]

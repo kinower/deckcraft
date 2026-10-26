@@ -309,7 +309,7 @@ pub struct UiState {
     pub presenter_view: bool,
     /// Where Presenter View's window was left: outer position and inner size in physical pixels.
     pub presenter_window: Option<[i32; 4]>,
-    /// The slide show display selected in Preferences (also updated by Swap Displays).
+    /// The slide show display selected in Set Up Slide Show (also updated by Swap Displays).
     pub show_display: Option<usize>,
     pub ui_scale: f32,
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).

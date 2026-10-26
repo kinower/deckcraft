@@ -164,7 +164,6 @@ fn preferences_snapshot(app: &SlideApp) -> Value {
     json!({
         "dark": app.ui.brightness == theme::Brightness::Dark,
         "uiScale": app.ui.ui_scale,
-        "showDisplay": app.ui.show_display,
         "prefs": serde_json::to_value(&app.session.prefs).unwrap_or(Value::Null),
     })
 }
@@ -179,9 +178,6 @@ fn restore_preferences(app: &mut SlideApp, d: &Dialog) {
     }
     if let Some(scale) = before.get("uiScale").and_then(Value::as_f64) {
         app.ui.ui_scale = scale as f32;
-    }
-    if let Some(display) = before.get("showDisplay").and_then(|v| serde_json::from_value(v.clone()).ok()) {
-        app.ui.show_display = display;
     }
     if let Some(prefs) = before.get("prefs").and_then(|p| serde_json::from_value(p.clone()).ok()) {
         app.session.prefs = prefs;
@@ -1287,8 +1283,33 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 }
             });
             let _ = combo.response.labelled_by(field.id);
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Multiple monitors").font(theme::bold(13.0)));
+            // Keep the machine-local choice pending until OK; Cancel, Esc and closing discard it.
+            let initial = app.ui.show_display.map_or_else(String::new, |i| i.to_string());
+            let mut display = d.get("showDisplay", &initial).parse::<usize>().ok();
+            let enabled = d.get("type", &sh.show_type) != "browsed";
+            ui.add_enabled_ui(enabled, |ui| {
+                ui.horizontal(|ui| {
+                    let label = ui.label("Slide show monitor:");
+                    let display_label = |i: usize| app.displays.list.get(i).map(|screen| format!("Display {} ({} × {})", i + 1, screen.w, screen.h));
+                    egui::ComboBox::from_id_salt("setup-show-monitor")
+                        .selected_text(display.and_then(display_label).unwrap_or_else(|| "Automatic".into()))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut display, None, "Automatic");
+                            for (i, screen) in app.displays.list.iter().enumerate() {
+                                ui.selectable_value(&mut display, Some(i), format!("Display {} ({} × {})", i + 1, screen.w, screen.h));
+                            }
+                        })
+                        .response
+                        .labelled_by(label.id)
+                        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, "Slide show monitor"));
+                });
+            });
+            d.fields.insert("showDisplay".into(), display.map_or_else(String::new, |i| i.to_string()));
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
+                app.ui.show_display = display;
                 let ty = d.get("type", "speaker");
                 let custom = d.fields.get("custom").cloned().unwrap_or_default();
                 run(app, "show.setup", json!({"type": ty, "loop": lp, "noNarration": nn, "noAnimation": na, "useTimings": ut, "custom": custom}));
@@ -2372,21 +2393,6 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 let units = &mut app.session.prefs.units;
                 ui.radio_value(units, deckcraft_geom::Unit::Inches, "Inches");
                 ui.radio_value(units, deckcraft_geom::Unit::Centimeters, "Centimeters");
-            });
-            ui.label(egui::RichText::new("Slide Show").font(theme::bold(13.0)));
-            ui.horizontal(|ui| {
-                ui.label("Slide show display:");
-                let selected = app.ui.show_display.filter(|&i| i < app.displays.list.len());
-                egui::ComboBox::from_id_salt("show-display-preference")
-                    .selected_text(selected.map_or_else(|| "Automatic (editor display)".into(), |i| format!("Display {}", i + 1)))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut app.ui.show_display, None, "Automatic (editor display)");
-                        for (i, display) in app.displays.list.iter().enumerate() {
-                            ui.selectable_value(&mut app.ui.show_display, Some(i), format!("Display {} ({} × {})", i + 1, display.w, display.h));
-                        }
-                    })
-                    .response
-                    .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, "Slide show display"));
             });
             ui.label(egui::RichText::new("Editing").font(theme::bold(13.0)));
             ui.checkbox(&mut app.session.prefs.smart_guides, "Show smart guides");

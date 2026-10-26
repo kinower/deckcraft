@@ -1,6 +1,6 @@
 # Slide show and presenter view: parity with PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-24 · **Change:** minor (Ctrl+wheel zooms the show around the pointer, #1286; previous: major, community PR wave 2026-10-14: interactive decks, laser pointer, See All Slides and zoom, go-to-slide number, custom show playback, presenter timer, clock, notes size and keyboard, Show Media Controls, swipe; breadth 68%; duplicated rows and headers folded; previous: major, created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-26 · **Change:** minor (slide show monitor selection moves to Set Up Slide Show, #1225; previous: minor, Ctrl+wheel zooms the show around the pointer, #1286; previous: major, community PR wave 2026-10-14: interactive decks, laser pointer, See All Slides and zoom, go-to-slide number, custom show playback, presenter timer, clock, notes size and keyboard, Show Media Controls, swipe; breadth 68%; duplicated rows and headers folded; previous: major, created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Presenting is the job PowerPoint is hired for. This doc covers the show window, presenter view,
 rehearsal and recording. Transition and animation playback are in
@@ -9,6 +9,12 @@ rehearsal and recording. Transition and animation playback are in
 ready** (estimated), **10–16 h** to parity.
 
 ## Running the show
+
+Set Up Slide Show includes **Multiple monitors → Slide show monitor**: Automatic or a
+connected display with its dimensions. OK commits the choice to the machine's `ui.json`
+(`showDisplay`); Cancel, Escape and the close button discard it. It is disabled for a
+browsed show. Starting a show uses the saved choice without prompting, with the existing
+automatic, disconnected-display and windowed fallbacks. Swap Displays updates the same setting.
 
 | Feature | PowerPoint | DeckCraft | Notes |
 |---|---|---|---|
@@ -79,6 +85,7 @@ Reading View in a window with navigation: present (checklist row done).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-26 | minor | Move the machine-local monitor selector from Preferences to Set Up Slide Show (#1225); scores unchanged |
 | 2026-10-22 | minor | See All Slides from presenter view opens in presenter view, not on the audience screen (#1130) |
 | 2026-10-14 | trivial | Community PR wave folded: one media playback row, the presenter pen/laser row matches the laser that exists, estimates keep only the open work (~9–16 h); checklist breadth 68% |
 | 2026-10-13 | minor | Click handling for interactive decks: triggers, per-slide state kept across visits, visible-shape hit testing with hand cursor, advance on click |

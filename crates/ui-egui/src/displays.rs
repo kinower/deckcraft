@@ -1,4 +1,4 @@
-//! Which display the slide show and Presenter View use. Preferences chooses the show's display,
+//! Which display the slide show and Presenter View use. Set Up Slide Show chooses the show's display,
 //! and Presenter View opens in a window that
 //! stays on top of the show and comes back where it was last left. Swap Displays trades them.
 //!
