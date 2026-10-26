@@ -911,7 +911,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     show.observe_visible_frame(now, web_time::Instant::now());
     if !show.started {
         // Use the display selected in Preferences, falling back when it was disconnected.
-        if !show.reading && show.presenter && app.displays.list.len() > 1 {
+        if show_fills_screen(show.reading, &doc.show.show_type) && show.presenter && app.displays.list.len() > 1 {
             show.display = Some(app.displays.first_choice(app.ui.show_display));
         }
         show.started = true;
@@ -2298,6 +2298,8 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, di
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
         // On top, so the full-screen show never hides it when they share a display.
+        // On Wayland, set_outer_position and set_window_level are unsupported: the
+        // compositor chooses Presenter View's display and stacking order instead.
         egui::ViewportBuilder::default()
             .with_title("Presenter View — DeckCraft")
             .with_inner_size(PRESENTER_SIZE)
@@ -2353,7 +2355,8 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, di
                         show.zoom_key();
                     }
                     // Swap Displays (PowerPoint's Display Settings), with more than one display.
-                    if let Some(d) = show.display
+                    if show_fills_screen(show.reading, &doc.show.show_type)
+                        && let Some(d) = show.display
                         && button(ui, "Swap Displays").clicked()
                         && let Some((to, r)) = show.presenter_at.and_then(|at| displays.swap(d, at))
                     {
@@ -2852,6 +2855,50 @@ mod tests {
         let show = harness.state().show.as_ref().unwrap();
         assert!(show.started);
         assert_eq!(show.display, None);
+    }
+
+    #[test]
+    fn browsed_show_neither_selects_nor_swaps_displays() {
+        use crate::displays::{Display, Displays};
+        use egui_kittest::kittest::Queryable;
+
+        let mut session = deckcraft_engine::Session::with_new();
+        session.execute("show.setup", &json!({"type": "browsed"})).unwrap();
+        let mut app = SlideApp::new(session, crate::Services::default());
+        app.ui.presenter_view = true;
+        app.ui.show_display = Some(1);
+        app.displays = Displays { list: vec![Display { x: 0, y: 0, w: 1920, h: 1080 }, Display { x: 1920, y: 0, w: 1280, h: 720 }], editor: Some(0) };
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1000.0, 700.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        harness.run_steps(3);
+        harness.state_mut().start_show(0, false);
+        harness.run_steps(2);
+        let show = harness.state().show.as_ref().unwrap();
+        assert!(show.started);
+        assert!(show.presenter);
+        assert_eq!(show.display, None, "a browsed show ignores the saved display");
+        assert_eq!(harness.state().ui.show_display, Some(1));
+
+        // Even a stale display assignment must not expose a path to SetMonitor.
+        let app = harness.state_mut();
+        let mut show = app.show.take().unwrap();
+        show.display = Some(1);
+        show.presenter_at = Some([0, 0, 1000, 700]);
+        let doc = app.session.active().unwrap().doc.clone();
+        let displays = app.displays.clone();
+        let mut presenter = egui_kittest::Harness::builder().with_size(vec2(1100.0, 700.0)).build_ui_state(
+            move |ui, (show, keep): &mut (Show, bool)| {
+                presenter_window(ui.ctx(), show, &doc, &displays, ui.input(|i| i.time), keep);
+            },
+            (show, true),
+        );
+        presenter.run_steps(2);
+        assert!(presenter.query_by_label("Swap Displays").is_none());
     }
 
     #[test]
