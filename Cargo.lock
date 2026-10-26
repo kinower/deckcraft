@@ -930,6 +930,7 @@ version = "0.11.1"
 dependencies = [
  "arboard",
  "chrono",
+ "clipboard-win",
  "cpal",
  "craft-update",
  "deckcraft-engine",

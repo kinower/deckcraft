@@ -261,6 +261,10 @@ pub struct Services {
     pub clipboard_html: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Put HTML and its plain-text alternative on the system clipboard. `true` when it landed.
     pub clipboard_set_html: Option<Box<dyn FnMut(&str, &str) -> bool>>,
+    /// Native DeckCraft objects from the system clipboard (versioned engine payload).
+    pub clipboard_native: Option<Box<dyn FnMut() -> Option<Vec<u8>>>>,
+    /// Publish native objects, HTML and plain text together. `true` prevents egui overwriting it.
+    pub clipboard_set_native: Option<Box<dyn FnMut(&[u8], &str, &str) -> bool>>,
     /// Audio output for media playback (cpal on desktop); without one media plays silently.
     pub audio_out: Option<Box<dyn deckcraft_media::AudioOut>>,
 }
@@ -600,7 +604,7 @@ pub struct SlideApp {
     #[cfg(not(target_arch = "wasm32"))]
     updates_rt: updates_ui::Runtime,
     /// Text for the system clipboard from a Copy or Cut command, handed over on the next frame.
-    pending_copy: Option<String>,
+    pending_copy: Option<(String, String, Option<Vec<u8>>)>,
     /// Bounded screenshot completion slots for the control channel (egui 0.37 callbacks).
     capture: capture::Capture,
     styled: bool,
@@ -954,6 +958,9 @@ impl SlideApp {
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
     /// status bar and are returned.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if id == "edit.paste" && params.get("text").is_none() && params.get("clipboard").is_none() {
+            self.import_system_clipboard();
+        }
         let r = if UI_COMMANDS.iter().any(|c| c.0 == id) {
             self.run_ui(id, &params)
         } else {
@@ -963,9 +970,7 @@ impl SlideApp {
             // Copy and Cut from the ribbon, menus, the slide's context menu or the control channel
             // put the text on the system clipboard, as Ctrl+C and Ctrl+X do (#431).
             Ok(v) if matches!(id, "edit.copy" | "edit.cut") => {
-                if let Some(t) = v.get("text").and_then(Value::as_str) {
-                    self.pending_copy = Some(t.to_string());
-                }
+                self.pending_copy = self.clipboard_offer(v);
             }
             Ok(_) => {}
             Err(e) => self.set_status(e.clone()),
@@ -3201,6 +3206,7 @@ impl SlideApp {
                 egui::Event::Copy => self.publish_clipboard(ctx, false),
                 egui::Event::Cut => self.publish_clipboard(ctx, true),
                 egui::Event::Paste(text) => {
+                    let native = self.import_system_clipboard();
                     // Our own marker for objects without text: paste what the session copied.
                     let text = if text == OBJECTS_MARKER { String::new() } else { text };
                     // A picture (TIFF from Keynote, a screenshot) lands when the paste has no text.
@@ -3208,15 +3214,19 @@ impl SlideApp {
                     let html = self.services.clipboard_html.as_mut().and_then(|f| f()).filter(|h| !h.is_empty());
                     // egui 0.37 sends `PasteImage` directly; the services fallback stays for
                     // integrations that still send an empty `Paste`. Never insert twice.
-                    let img = if text.is_empty() && !pasted_image_event { self.services.clipboard_image.as_mut().and_then(|f| f()) } else { None };
+                    let img = if !native && text.is_empty() && !pasted_image_event {
+                        self.services.clipboard_image.as_mut().and_then(|f| f())
+                    } else {
+                        None
+                    };
                     let revision = self.session.active().map(|d| d.revision);
                     let r = match img {
                         Some(png) => self
                             .session
                             .execute("insert.picture", &json!({"name": "Pasted image.png", "data": deckcraft_engine::cmd::base64_encode(&png)})),
                         None => {
-                            let mut params = json!({"text": text});
-                            if let Some(h) = html {
+                            let mut params = if native { json!({}) } else { json!({"text": text}) };
+                            if let Some(h) = html.filter(|_| !native) {
                                 params["html"] = Value::String(h);
                             }
                             self.session.execute("edit.paste", &params)
@@ -3262,20 +3272,49 @@ impl SlideApp {
 
     /// Offer the copy or cut on the system clipboard.
     ///
-    /// Slides go out as plain text. Text goes out as HTML plus the same plain words, so a paste
-    /// back into DeckCraft still uses the internal clipboard. A textless shape leaves the
+    /// Native hosts offer objects alongside HTML and plain text. A textless shape leaves the
     /// invisible [`OBJECTS_MARKER`] rather than a picture: with only an image on the clipboard
     /// egui-winit drops Ctrl+V, and the shortcut could no longer paste the shape here (#182).
     fn publish_clipboard(&mut self, ctx: &egui::Context, cut: bool) {
         let cmd = if cut { "edit.cut" } else { "edit.copy" };
         let Ok(v) = self.session.execute(cmd, &json!({})) else { return };
-        let text = v.get("text").and_then(Value::as_str).unwrap_or("").to_string();
-        let html = v.get("html").and_then(Value::as_str).unwrap_or("").to_string();
-        if self.session.clipboard.slides.is_empty() && !html.is_empty() && self.services.clipboard_set_html.as_mut().is_some_and(|f| f(&html, &text))
-        {
+        if let Some(offer) = self.clipboard_offer(&v) {
+            self.offer_system_clipboard(ctx, offer);
+        }
+    }
+
+    fn clipboard_offer(&self, result: &Value) -> Option<(String, String, Option<Vec<u8>>)> {
+        if result.get("copied").and_then(Value::as_bool) == Some(false) {
+            return None;
+        }
+        Some((
+            result.get("text").and_then(Value::as_str).unwrap_or("").to_string(),
+            result.get("html").and_then(Value::as_str).unwrap_or("").to_string(),
+            self.services.clipboard_set_native.as_ref().and_then(|_| self.session.clipboard.to_system_bytes()),
+        ))
+    }
+
+    fn offer_system_clipboard(&mut self, ctx: &egui::Context, (text, html, native): (String, String, Option<Vec<u8>>)) {
+        let plain = system_clipboard_text(&text);
+        if native.as_ref().is_some_and(|bytes| self.services.clipboard_set_native.as_mut().is_some_and(|f| f(bytes, &html, &plain))) {
             return;
         }
-        ctx.copy_text(system_clipboard_text(&text));
+        if !html.is_empty() && self.services.clipboard_set_html.as_mut().is_some_and(|f| f(&html, &text)) {
+            return;
+        }
+        ctx.copy_text(plain);
+    }
+
+    /// Prefer objects over their text alternative. An unchanged offer keeps the local paste
+    /// counter and clipboard, including when switching tabs inside the source window.
+    fn import_system_clipboard(&mut self) -> bool {
+        let Some(bytes) = self.services.clipboard_native.as_mut().and_then(|f| f()) else { return false };
+        if self.session.clipboard.to_system_bytes().as_deref() == Some(bytes.as_slice()) {
+            return true;
+        }
+        let Some(clip) = deckcraft_engine::Clipboard::from_system_bytes(&bytes) else { return false };
+        self.session.clipboard = clip;
+        true
     }
 
     /// Lay out the whole window.
@@ -3377,7 +3416,7 @@ impl SlideApp {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
         if let Some(t) = self.pending_copy.take() {
-            ctx.copy_text(t);
+            self.offer_system_clipboard(&ctx, t);
         }
         self.drain_requests();
         doc_window::show(self, &ctx);
@@ -4762,6 +4801,75 @@ mod tests {
         );
         h.run_steps(2);
         h
+    }
+
+    /// Independent sessions exchange objects through the host, by keyboard and menu, even when
+    /// their plain-text alternatives are identical. Source closure does not invalidate bytes.
+    #[test]
+    fn system_clipboard_between_sessions_keyboard_and_menu() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        for slides in [false, true] {
+            let shared = Rc::new(RefCell::new(None::<Vec<u8>>));
+            let record = shared.clone();
+            let services = Services {
+                clipboard_set_native: Some(Box::new(move |bytes, _, text| {
+                    assert!(!text.is_empty(), "textless objects still produce a paste event");
+                    *record.borrow_mut() = Some(bytes.to_vec());
+                    true
+                })),
+                ..Default::default()
+            };
+            let mut source = step_app(services);
+            source.state_mut().run("shape.insert", json!({"preset": "star5", "rect": [80, 80, 120, 90]})).unwrap();
+            if slides {
+                source.state_mut().run("edit.cut", json!({"scope": "slides"})).unwrap();
+                source.run_steps(1);
+            } else {
+                source.event(egui::Event::Copy);
+                source.run_steps(1);
+            }
+            assert!(shared.borrow().is_some());
+            assert!(!source.output().platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(_))));
+            drop(source);
+            let read = shared.clone();
+            let services = Services { clipboard_native: Some(Box::new(move || read.borrow().clone())), ..Default::default() };
+            let mut dest = step_app(services);
+            let before = dest.state().session.active().unwrap().doc.slides[0].shapes.len();
+            if slides {
+                dest.state_mut().run("edit.paste", json!({"scope": "slides"})).unwrap();
+            } else {
+                dest.event(egui::Event::Paste(OBJECTS_MARKER.into()));
+                dest.run_steps(1);
+            }
+            let st = dest.state().session.active().unwrap();
+            if slides {
+                assert_eq!(st.doc.slides.len(), 2);
+                assert_eq!(st.doc.slides[1].shapes.len(), before + 1);
+            } else {
+                assert_eq!(st.doc.slides[0].shapes.len(), before + 1);
+                dest.event(egui::Event::Paste(OBJECTS_MARKER.into()));
+                dest.run_steps(1);
+                assert_eq!(dest.state().session.clipboard.pastes, 2, "same offer must not reset the offset counter");
+            }
+            dest.state_mut().run("edit.undo", json!({})).unwrap();
+            dest.state_mut().run("edit.redo", json!({})).unwrap();
+        }
+    }
+
+    #[test]
+    fn system_clipboard_invalid_native_preserves_html_fallback() {
+        let services = Services {
+            clipboard_native: Some(Box::new(|| Some(b"invalid native format".to_vec()))),
+            clipboard_html: Some(Box::new(|| Some("<p><b>External</b></p>".into()))),
+            ..Default::default()
+        };
+        let mut dest = step_app(services);
+        dest.event(egui::Event::Paste("External".into()));
+        dest.run_steps(1);
+        let st = dest.state().session.active().unwrap();
+        let text = st.doc.slides[0].shapes.iter().filter_map(|s| s.text.as_ref()).find(|t| t.text() == "External").unwrap();
+        assert_eq!(text.paragraphs[0].runs[0].props.bold, Some(true));
     }
 
     /// Copy of a bold selection offers HTML; paste of Pages-like HTML keeps the bold.
