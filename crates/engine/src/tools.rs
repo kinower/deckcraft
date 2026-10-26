@@ -985,10 +985,15 @@ impl Session {
                 let (nx, nc) = match part {
                     CropPart::Frame(h) => {
                         let f = cmd::crop::drag_frame(orig.w, orig.h, h, d);
+                        let f = self.snap_crop_rect(f, &orig, Some(h), id, tol, !mods.cmd);
                         let c = cmd::crop::crop_of(f.width(), f.height(), img - f.origin().to_vec2());
                         (cmd::crop::frame_xfrm(&orig, f), c)
                     }
-                    CropPart::Image(h) => (orig, cmd::crop::crop_of(orig.w, orig.h, cmd::crop::drag_image(img, h, d, mods.shift))),
+                    CropPart::Image(h) => {
+                        let image = cmd::crop::drag_image(img, h, d, mods.shift);
+                        let image = self.snap_crop_rect(image, &orig, Some(h), id, tol, !mods.cmd);
+                        (orig, cmd::crop::crop_of(orig.w, orig.h, image))
+                    }
                     CropPart::Pan => {
                         if mods.shift {
                             if d.x.abs() > d.y.abs() {
@@ -997,7 +1002,8 @@ impl Session {
                                 d.x = 0.0;
                             }
                         }
-                        (orig, cmd::crop::crop_of(orig.w, orig.h, img + d))
+                        let image = self.snap_crop_rect(img + d, &orig, None, id, tol, !mods.cmd);
+                        (orig, cmd::crop::crop_of(orig.w, orig.h, image))
                     }
                 };
                 // Stored as the renderer draws it, so the next gesture starts from what is shown.
@@ -1845,6 +1851,29 @@ impl Session {
             off.y = deckcraft_geom::snap(at, self.prefs.grid_spacing) - at;
         }
         (off, guides)
+    }
+
+    /// Snap a crop rectangle in slide coordinates, then return it to the original picture's
+    /// local frame. Exclude the picture itself: its fixed crop box is not a snap target.
+    fn snap_crop_rect(&mut self, r: Rect, orig: &Xfrm, handle: Option<u8>, id: ShapeId, tol: f64, enabled: bool) -> Rect {
+        if !enabled || orig.rot != 0.0 {
+            self.tool.guides.clear();
+            return r;
+        }
+        let x = cmd::crop::frame_xfrm(orig, r);
+        let snapped = if let Some(h) = handle {
+            self.snap_resize(x, orig, h, id, tol).rect()
+        } else {
+            let (off, guides) = self.snap_rect(x.rect(), &[id], tol * 1.5, true);
+            self.tool.guides = guides;
+            x.rect() + off
+        };
+        let local = orig.affine().inverse().transform_rect_bbox(snapped);
+        if local.width() < cmd::crop::MIN_SIDE || local.height() < cmd::crop::MIN_SIDE {
+            self.tool.guides.clear();
+            return r;
+        }
+        local
     }
 
     /// Snap the edges that resize handle `handle` drags in the resized box `x` to the smart guides.

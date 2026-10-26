@@ -5553,6 +5553,121 @@ fn crop_mode_handles_crop_move_and_scale_the_picture() {
 }
 
 #[test]
+fn crop_frame_snaps_only_dragged_edges_and_keeps_the_image_in_place() {
+    for target in ["guide", "slide", "center", "shape", "grid", "hidden", "disabled", "ctrl", "self"] {
+        let mut s = session();
+        let id = cropped_picture(&mut s);
+        s.prefs.smart_guides = target != "disabled";
+        s.tool.guides_visible = target != "hidden";
+        s.edit(|doc, _| {
+            doc.guides.push(deckcraft_model::DrawGuide { vertical: true, pos: 240.0 });
+            Ok(())
+        })
+        .unwrap();
+        if target == "shape" {
+            s.execute("shape.insert", &json!({"preset": "rect", "rect": [240, 310, 40, 40]})).unwrap();
+        }
+        if target == "grid" {
+            s.tool.guides_visible = false;
+            s.prefs.snap_to_grid = true;
+            s.prefs.grid_spacing = 20.0;
+        }
+        let (at, expected) = match target {
+            "slide" => (s.doc().unwrap().doc.slide_size.width - 2.0, s.doc().unwrap().doc.slide_size.width),
+            "center" => (s.doc().unwrap().doc.slide_size.width / 2.0 - 2.0, s.doc().unwrap().doc.slide_size.width / 2.0),
+            "hidden" | "disabled" | "ctrl" => (238.0, 238.0),
+            "self" => (298.0, 298.0),
+            _ => (238.0, 240.0),
+        };
+        let mods = Mods { cmd: target == "ctrl", ..Mods::default() };
+        let ev = |kind, x| PointerEvent { kind, x, y: 175.0, mods, tol: 3.0, pressure: None };
+        s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+        s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+        s.pointer(ev(PointerKind::Down, 300.0)).unwrap();
+        s.pointer(ev(PointerKind::Drag, at)).unwrap();
+        let (b, c) = crop_state(&s, id);
+        assert!(near(b, [100.0, 100.0, expected - 100.0, 150.0]), "{target}: {b:?}");
+        let image = cmd::crop::image_rect(b[2], b[3], c).unwrap();
+        assert!(near([image.x0 + b[0], image.y0 + b[1], image.width(), image.height()], [100.0, 100.0, 200.0, 150.0]), "{target}: {image:?}");
+        if matches!(target, "guide" | "slide" | "center" | "shape") {
+            assert!(s.tool.guides.iter().any(|g| g.vertical && (g.pos - expected).abs() < 1e-6), "{target}");
+        } else {
+            assert!(s.tool.guides.is_empty(), "{target}");
+        }
+        s.pointer(ev(PointerKind::Up, at)).unwrap();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(near(crop_state(&s, id).0, [100.0, 100.0, 200.0, 150.0]));
+    }
+}
+
+#[test]
+fn crop_image_handles_and_pan_snap_without_moving_the_frame() {
+    for pan in [false, true] {
+        for ctrl in [false, true] {
+            let mut s = session();
+            let id = cropped_picture(&mut s);
+            s.execute("picture.crop", &json!({"ids": [id], "right": 0.25})).unwrap();
+            s.prefs.smart_guides = true;
+            s.tool.guides_visible = true;
+            s.edit(|doc, _| {
+                doc.guides.push(deckcraft_model::DrawGuide { vertical: true, pos: 340.0 });
+                Ok(())
+            })
+            .unwrap();
+            s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+            let mods = Mods { cmd: ctrl, ..Mods::default() };
+            let ev = |kind, x| PointerEvent { kind, x, y: 175.0, mods, tol: 3.0, pressure: None };
+            let start = if pan { 200.0 } else { 300.0 };
+            let hit = s.pointer(ev(PointerKind::Down, start)).unwrap();
+            assert_eq!(hit["hit"]["kind"], if pan { "cropPan" } else { "cropImage" });
+            s.pointer(ev(PointerKind::Drag, start + 38.0)).unwrap();
+            let (b, c) = crop_state(&s, id);
+            assert!(near(b, [100.0, 100.0, 150.0, 150.0]));
+            let image = cmd::crop::image_rect(b[2], b[3], c).unwrap();
+            assert!((image.x1 + b[0] - if ctrl { 338.0 } else { 340.0 }).abs() < 1e-6, "{image:?}");
+            assert_eq!(s.tool.guides.is_empty(), ctrl);
+        }
+    }
+}
+
+#[test]
+fn crop_snapping_handles_flips_and_skips_rotated_pictures() {
+    for rotated in [false, true] {
+        let mut s = session();
+        let id = cropped_picture(&mut s);
+        let sid = ShapeId(id as _);
+        s.execute("arrange.flipHorizontal", &json!({"ids": [id]})).unwrap();
+        if rotated {
+            s.execute("shape.rotate", &json!({"ids": [id], "by": 30.0})).unwrap();
+        }
+        let orig = s.doc().unwrap().shape(sid).unwrap().xfrm.unwrap();
+        let start = orig.affine() * deckcraft_geom::Point::new(200.0, 75.0);
+        let to = orig.affine() * deckcraft_geom::Point::new(138.0, 75.0);
+        let guide = to.x + 2.0;
+        s.prefs.smart_guides = true;
+        s.tool.guides_visible = true;
+        s.edit(|doc, _| {
+            doc.guides.push(deckcraft_model::DrawGuide { vertical: true, pos: guide });
+            Ok(())
+        })
+        .unwrap();
+        s.execute("picture.cropMode", &json!({"id": id})).unwrap();
+        let ev = |kind, p: deckcraft_geom::Point| PointerEvent { kind, x: p.x, y: p.y, mods: Mods::default(), tol: 3.0, pressure: None };
+        s.pointer(ev(PointerKind::Down, start)).unwrap();
+        s.pointer(ev(PointerKind::Drag, to)).unwrap();
+        let (b, c) = crop_state(&s, id);
+        assert!((b[2] - if rotated { 138.0 } else { 136.0 }).abs() < 1e-6, "{b:?}");
+        assert_eq!(s.tool.guides.is_empty(), rotated);
+        let x = s.doc().unwrap().shape(sid).unwrap().xfrm.unwrap();
+        let image = cmd::crop::image_rect(b[2], b[3], c).unwrap();
+        let image_origin = x.affine() * image.origin();
+        let before = orig.affine() * deckcraft_geom::Point::ORIGIN;
+        assert!((image_origin - before).hypot() < 1e-6);
+        assert!((image.width() - 200.0).abs() < 1e-6);
+    }
+}
+
+#[test]
 fn crop_mode_ends_when_the_picture_stops_being_selected() {
     let mut s = session();
     let rect = s.execute("shape.insert", &json!({"preset": "rect", "rect": [400, 300, 50, 50]})).unwrap()["id"].as_u64().unwrap();
