@@ -537,16 +537,9 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let now = ctx.input(|i| i.time);
     let Some(mut show) = app.show.take() else { return };
     if !show.started {
-        // With Presenter View and several displays, ask which display the show fills.
-        if !show.reading && show.presenter && show.display.is_none() && app.displays.list.len() > 1 {
-            match ask_display(&ctx, ui, &app.displays, app.ui.show_display) {
-                None => {
-                    app.show = Some(show);
-                    return;
-                }
-                Some(None) => return,
-                Some(Some(d)) => show.display = Some(d),
-            }
+        // Use the display selected in Preferences, falling back when it was disconnected.
+        if !show.reading && show.presenter && app.displays.list.len() > 1 {
+            show.display = Some(app.displays.first_choice(app.ui.show_display));
         }
         show.started = true;
         show.slide_start = now;
@@ -1065,12 +1058,15 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     // Presenter view in a second window.
     if keep && show.presenter && !show.reading {
+        let previous_display = show.display;
         presenter_window(&ctx, &mut show, &doc, &app.displays, now, &mut keep);
         // Remembered for the next show, as PowerPoint does.
         if show.presenter_at.is_some() {
             app.ui.presenter_window = show.presenter_at;
         }
-        if show.display.is_some() {
+        // Only an explicit Swap Displays changes the preference; automatic/fallback placement
+        // must not replace the user's saved choice.
+        if show.display != previous_display {
             app.ui.show_display = show.display;
         }
     }
@@ -1763,49 +1759,6 @@ fn render_thumb(ctx: &egui::Context, show: &mut Show, doc: &Presentation, i: usi
     Some(tex)
 }
 
-/// Asks which display the show fills: one button per display, the one chosen last time marked;
-/// Enter takes it, 1–9 pick a display and Esc cancels the show. `None` while asking, `Some(None)`
-/// when cancelled.
-fn ask_display(ctx: &egui::Context, ui: &mut Ui, displays: &crate::displays::Displays, last: Option<usize>) -> Option<Option<usize>> {
-    ui.painter().rect_filled(ui.max_rect(), CornerRadius::ZERO, Color32::from_gray(24));
-    let first = displays.first_choice(last);
-    let mut choice = None;
-    egui::Modal::new(egui::Id::new("deckcraft-show-display")).show(ctx, |ui| {
-        ui.set_width(360.0);
-        ui.label(egui::RichText::new("Slide Show").strong().size(15.0));
-        ui.add_space(4.0);
-        ui.label("Which display should the slide show fill? Presenter View stays on top of it.");
-        ui.add_space(8.0);
-        for (i, d) in displays.list.iter().enumerate() {
-            let here = if displays.editor == Some(i) { ", this window" } else { "" };
-            let text = format!("{}   Display {}   ({} × {}{here})", i + 1, i + 1, d.w, d.h);
-            if ui.add_sized([ui.available_width(), 30.0], egui::Button::new(text).selected(i == first)).clicked() {
-                choice = Some(Some(i));
-            }
-        }
-        ui.add_space(6.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Cancel").clicked() {
-                choice = Some(None);
-            }
-        });
-    });
-    use egui::Key::*;
-    ctx.input_mut(|i| {
-        if i.consume_key(egui::Modifiers::NONE, Escape) {
-            choice = Some(None);
-        } else if i.consume_key(egui::Modifiers::NONE, Enter) {
-            choice = Some(Some(first));
-        }
-        for (n, k) in [Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9].into_iter().enumerate().take(displays.list.len()) {
-            if i.consume_key(egui::Modifiers::NONE, k) {
-                choice = Some(Some(n));
-            }
-        }
-    });
-    choice
-}
-
 /// Moves Presenter View's window to `show.presenter_place` (one frame to move it, the next to size
 /// it at the new display's scale), else notes where it is (`show.presenter_at`). Runs in its viewport.
 fn place_presenter(ctx: &egui::Context, show: &mut Show) {
@@ -2101,9 +2054,9 @@ mod tests {
         assert!(!harness.state().2, "Escape from Presenter View ends the show");
     }
 
-    /// With two displays the show asks which one to fill and remembers the answer; Esc cancels it.
+    /// Preferences selects the display; starting and restarting a show never asks again.
     #[test]
-    fn with_two_displays_the_show_asks_which_one_to_fill() {
+    fn the_show_uses_the_display_saved_in_preferences_without_asking() {
         use crate::displays::{Display, Displays};
         use egui_kittest::kittest::Queryable;
 
@@ -2118,34 +2071,67 @@ mod tests {
             app,
         );
         harness.run_steps(3);
-        harness.state_mut().start_show(0, false);
+        // The setting is used on each start, with automatic and disconnected-display fallbacks.
+        for (saved, expected) in [(Some(1), 1), (Some(1), 1), (None, 0), (Some(5), 0)] {
+            harness.state_mut().ui.show_display = saved;
+            harness.state_mut().start_show(0, false);
+            harness.run_steps(2);
+            let show = harness.state().show.as_ref().unwrap();
+            assert!(show.started);
+            assert_eq!(show.display, Some(expected));
+            assert_eq!(harness.state().ui.show_display, saved);
+            assert!(harness.query_by_label_contains("Which display").is_none());
+            harness.key_press(egui::Key::Escape);
+            harness.run_steps(2);
+            assert!(harness.state().show.is_none());
+        }
+        // Windowed reading mode must not be moved to the saved display.
+        harness.state_mut().ui.show_display = Some(1);
+        harness.state_mut().start_show(0, true);
         harness.run_steps(2);
-        assert!(harness.query_by_label_contains("Which display").is_some(), "it asks");
-        assert!(!harness.state().show.as_ref().unwrap().started, "and waits for the answer");
-        harness.query_by_label_contains("Display 2").unwrap().click();
-        harness.run_steps(3);
-        let show = harness.state().show.as_ref().unwrap();
-        assert!(show.started);
-        assert_eq!(show.display, Some(1));
-        assert_eq!(harness.state().ui.show_display, Some(1), "remembered for the next show");
+        assert_eq!(harness.state().show.as_ref().unwrap().display, None);
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        assert!(harness.state().show.is_none());
-
-        // Esc at the question cancels the show; the editor stays.
-        harness.state_mut().start_show(0, false);
-        harness.run_steps(2);
-        assert!(harness.query_by_label_contains("Which display").is_some());
-        harness.key_press(egui::Key::Escape);
-        harness.run_steps(2);
-        assert!(harness.state().show.is_none());
-
-        // One display: no question.
         harness.state_mut().displays.list.truncate(1);
         harness.state_mut().start_show(0, false);
         harness.run_steps(2);
-        assert!(harness.state().show.as_ref().unwrap().started);
-        assert!(harness.query_by_label_contains("Which display").is_none());
+        let show = harness.state().show.as_ref().unwrap();
+        assert!(show.started);
+        assert_eq!(show.display, None);
+    }
+
+    #[test]
+    fn preferences_display_selection_can_be_cancelled_or_saved() {
+        use crate::displays::{Display, Displays};
+        use egui_kittest::kittest::Queryable;
+
+        let mut app = SlideApp::new(deckcraft_engine::Session::with_new(), crate::Services::default());
+        app.displays = Displays { list: vec![Display { x: 0, y: 0, w: 1920, h: 1080 }, Display { x: 1920, y: 0, w: 1280, h: 720 }], editor: Some(0) };
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1000.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(3);
+        for close in ["Cancel", "Escape", "Done"] {
+            h.state_mut().run("app.preferences", json!({})).unwrap();
+            h.run_steps(2);
+            h.get_by_label("Slide show display").click_accesskit();
+            h.run_steps(2);
+            h.get_by_label("Display 2 (1280 × 720)").click_accesskit();
+            h.run_steps(2);
+            assert_eq!(h.state().ui.show_display, Some(1));
+            if close == "Escape" {
+                h.key_press(egui::Key::Escape);
+            } else {
+                h.get_by_label(close).click_accesskit();
+            }
+            h.run_steps(2);
+            assert!(h.state().dialog.is_none());
+            assert_eq!(h.state().ui.show_display, if close == "Done" { Some(1) } else { None });
+        }
     }
 
     #[test]

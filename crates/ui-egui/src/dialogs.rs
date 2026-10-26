@@ -145,6 +145,7 @@ fn preferences_snapshot(app: &SlideApp) -> Value {
     json!({
         "dark": app.ui.brightness == theme::Brightness::Dark,
         "uiScale": app.ui.ui_scale,
+        "showDisplay": app.ui.show_display,
         "prefs": serde_json::to_value(&app.session.prefs).unwrap_or(Value::Null),
     })
 }
@@ -159,6 +160,9 @@ fn restore_preferences(app: &mut SlideApp, d: &Dialog) {
     }
     if let Some(scale) = before.get("uiScale").and_then(Value::as_f64) {
         app.ui.ui_scale = scale as f32;
+    }
+    if let Some(display) = before.get("showDisplay").and_then(|v| serde_json::from_value(v.clone()).ok()) {
+        app.ui.show_display = display;
     }
     if let Some(prefs) = before.get("prefs").and_then(|p| serde_json::from_value(p.clone()).ok()) {
         app.session.prefs = prefs;
@@ -2172,6 +2176,21 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 }
                 d.fields.remove("uiScale");
             }
+            ui.label(egui::RichText::new("Slide Show").font(theme::bold(13.0)));
+            ui.horizontal(|ui| {
+                ui.label("Slide show display:");
+                let selected = app.ui.show_display.filter(|&i| i < app.displays.list.len());
+                egui::ComboBox::from_id_salt("show-display-preference")
+                    .selected_text(selected.map_or_else(|| "Automatic (editor display)".into(), |i| format!("Display {}", i + 1)))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut app.ui.show_display, None, "Automatic (editor display)");
+                        for (i, display) in app.displays.list.iter().enumerate() {
+                            ui.selectable_value(&mut app.ui.show_display, Some(i), format!("Display {} ({} × {})", i + 1, display.w, display.h));
+                        }
+                    })
+                    .response
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Slide show display"));
+            });
             ui.label(egui::RichText::new("Editing").font(theme::bold(13.0)));
             ui.checkbox(&mut app.session.prefs.smart_guides, "Show smart guides");
             ui.checkbox(&mut app.session.prefs.snap_to_grid, "Snap objects to grid");

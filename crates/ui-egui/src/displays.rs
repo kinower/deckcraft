@@ -1,5 +1,5 @@
-//! Which display the slide show and Presenter View use. With more than one display the show asks
-//! which one to fill (the one chosen last time first), and Presenter View opens in a window that
+//! Which display the slide show and Presenter View use. Preferences chooses the show's display,
+//! and Presenter View opens in a window that
 //! stays on top of the show and comes back where it was last left. Swap Displays trades them.
 //!
 //! The desktop app reports the displays ([`crate::SlideApp::displays`]) in physical pixels, in the
@@ -56,8 +56,7 @@ impl Displays {
         self.editor.filter(|&e| Some(e) != not && e < self.list.len()).or_else(|| (0..self.list.len()).find(|&i| Some(i) != not))
     }
 
-    /// The display offered first when the show asks where to go: the one chosen last time while
-    /// it is still there, else the editor's.
+    /// The saved display while it is still there, else the editor's.
     pub fn first_choice(&self, last: Option<usize>) -> usize {
         let valid = |i: &usize| *i < self.list.len();
         last.filter(valid).or(self.editor.filter(valid)).unwrap_or(0)
@@ -105,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    fn the_question_offers_the_last_choice_first() {
+    fn the_saved_display_falls_back_when_disconnected() {
         let mut d = two();
         assert_eq!(d.first_choice(None), 0, "the editor's display");
         assert_eq!(d.first_choice(Some(1)), 1);
