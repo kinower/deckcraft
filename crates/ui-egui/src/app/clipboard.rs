@@ -50,16 +50,6 @@ impl SlideApp {
     /// counter and clipboard, including when switching tabs inside the source window.
     pub(super) fn import_system_clipboard(&mut self) -> bool {
         let Some(bytes) = self.services.clipboard_native.as_mut().and_then(|f| f()) else { return false };
-        if self.session.clipboard.to_system_bytes().as_deref() == Some(bytes.as_slice()) {
-            return true;
-        }
-        let Some(mut clip) = deckcraft_engine::Clipboard::from_system_bytes(&bytes) else { return false };
-        let mut previous = self.session.clipboard.clone();
-        previous.pastes = clip.pastes;
-        if previous.foreign && previous.to_system_bytes() == clip.to_system_bytes() {
-            clip.pastes = self.session.clipboard.pastes;
-        }
-        self.session.clipboard = clip;
-        true
+        self.session.clipboard.adopt_system_bytes(&bytes)
     }
 }

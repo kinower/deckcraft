@@ -265,19 +265,10 @@ fn bring_media(cmd: &str, doc: &mut deckcraft_model::Presentation, media: &[deck
 }
 
 fn paste(s: &mut Session, p: &Value) -> Result<Value> {
-    let native = str_param(p, "clipboard")
+    let has_native = str_param(p, "clipboard")
         .filter(|data| data.len() <= crate::clipboard::MAX_BYTES * 4 / 3 + 4)
         .and_then(super::base64_decode)
-        .and_then(|bytes| crate::Clipboard::from_system_bytes(&bytes));
-    let has_native = native.is_some();
-    if let Some(mut clip) = native {
-        let mut previous = s.clipboard.clone();
-        previous.pastes = clip.pastes;
-        if previous.foreign && previous.to_system_bytes() == clip.to_system_bytes() {
-            clip.pastes = s.clipboard.pastes;
-        }
-        s.clipboard = clip;
-    }
+        .is_some_and(|bytes| s.clipboard.adopt_system_bytes(&bytes));
     // External plain text (from the system clipboard) wins when given and differs from ours.
     // HTML from Pages or Keynote keeps bold, italic and underline when it says the same words.
     if !has_native

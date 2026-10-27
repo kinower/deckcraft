@@ -19,6 +19,20 @@ struct Payload {
 }
 
 impl Clipboard {
+    /// Adopt a system offer, keeping local state when it is the same selection.
+    pub fn adopt_system_bytes(&mut self, bytes: &[u8]) -> bool {
+        if self.system_bytes.is_none() {
+            self.system_bytes = self.to_system_bytes();
+        }
+        if self.system_bytes.as_deref() == Some(bytes) {
+            return true;
+        }
+        let Some(mut clipboard) = Self::from_system_bytes(bytes) else { return false };
+        clipboard.system_bytes = Some(bytes.to_vec());
+        *self = clipboard;
+        true
+    }
+
     /// Encode only this selection and its dependencies. Paste counters are process-local.
     pub fn to_system_bytes(&self) -> Option<Vec<u8>> {
         if self.shapes.is_empty() && self.slides.is_empty() && self.text.is_none() {

@@ -475,6 +475,9 @@ pub struct Clipboard {
     /// How many times the shapes were pasted (each paste offsets further).
     #[serde(skip)]
     pub pastes: u32,
+    /// Cached system representation used to recognize repeated offers.
+    #[serde(skip)]
+    pub system_bytes: Option<Vec<u8>>,
 }
 
 pub struct Session {
