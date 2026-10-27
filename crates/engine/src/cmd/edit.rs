@@ -270,7 +270,12 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(super::base64_decode)
         .and_then(|bytes| crate::Clipboard::from_system_bytes(&bytes));
     let has_native = native.is_some();
-    if let Some(clip) = native {
+    if let Some(mut clip) = native {
+        let mut previous = s.clipboard.clone();
+        previous.pastes = clip.pastes;
+        if previous.foreign && previous.to_system_bytes() == clip.to_system_bytes() {
+            clip.pastes = s.clipboard.pastes;
+        }
         s.clipboard = clip;
     }
     // External plain text (from the system clipboard) wins when given and differs from ours.
@@ -328,7 +333,13 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let off = s.prefs.duplicate_offset * s.clipboard.pastes as f64;
         // Pasting on another slide keeps the position; on the same slide it offsets.
         let same_slide = !clip.foreign && s.doc().ok().is_some_and(|d| clip.shapes.iter().any(|c| d.shape(c.id).is_some()));
-        let off = if same_slide { off } else { 0.0 };
+        let off = if clip.foreign {
+            s.prefs.duplicate_offset * clip.pastes as f64
+        } else if same_slide {
+            off
+        } else {
+            0.0
+        };
         return s.edit(|doc, sel| {
             let media = bring_media("edit.paste", doc, &clip.media)?;
             let mut shapes = clip.shapes.clone();

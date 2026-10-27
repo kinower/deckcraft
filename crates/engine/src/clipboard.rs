@@ -49,6 +49,7 @@ impl Clipboard {
             return None;
         }
         payload.clipboard.foreign = true;
+        payload.clipboard.pastes = 0;
         Some(payload.clipboard)
     }
 }
@@ -175,5 +176,37 @@ mod tests {
         v["media"] = json!(["!!!"]);
         assert!(Clipboard::from_system_bytes(&serde_json::to_vec(&v).unwrap()).is_none());
         assert!(Clipboard::from_system_bytes(&vec![0; MAX_BYTES + 1]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod repeated_paste_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+    use crate::Session;
+    use serde_json::json;
+
+    #[test]
+    fn repeated_foreign_offer_offsets_after_first_paste_and_new_offer_resets() {
+        let mut src = Session::with_new();
+        src.execute("shape.insert", &json!({"preset":"rect", "rect":[100,120,200,80]})).unwrap();
+        src.execute("edit.copy", &json!({})).unwrap();
+        let bytes = src.clipboard.to_system_bytes().unwrap();
+        let mut dst = Session::with_new();
+        for (native, count) in [(true, 0), (true, 1), (false, 2)] {
+            let params = if native { json!({"clipboard":base64_encode(&bytes)}) } else { json!({}) };
+            dst.execute("edit.paste", &params).unwrap();
+            let doc = dst.doc().unwrap();
+            let x = doc.shape(doc.selection.shapes[0]).unwrap().xfrm.unwrap();
+            let offset = dst.prefs.duplicate_offset * count as f64;
+            assert_eq!((x.x, x.y), (100.0 + offset, 120.0 + offset));
+        }
+        src.execute("shape.insert", &json!({"preset":"rect", "rect":[200,220,200,80]})).unwrap();
+        src.execute("edit.copy", &json!({})).unwrap();
+        let bytes = src.clipboard.to_system_bytes().unwrap();
+        dst.execute("edit.paste", &json!({"clipboard":base64_encode(&bytes)})).unwrap();
+        let doc = dst.doc().unwrap();
+        let x = doc.shape(doc.selection.shapes[0]).unwrap().xfrm.unwrap();
+        assert_eq!((x.x, x.y), (200.0, 220.0));
     }
 }
