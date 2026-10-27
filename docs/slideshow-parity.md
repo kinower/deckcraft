@@ -53,8 +53,8 @@ automatic, disconnected-display and windowed fallbacks. Swap Displays updates th
 | Slide counter, previous/next/end buttons | yes | yes | |
 | Keyboard navigation while Presenter View has focus | yes | yes | Shares the audience window's key handling; handled keys are consumed before buttons, and the presenter stays available at the end screen |
 | Notes font size, scrolling | yes | yes: A- / A+ (and `[` / `]`), 12–48 pt in steps of 4, default 18; the notes scroll | |
-| Placed on the presenter's display automatically, show on the projector | yes | **no**: opens wherever the OS puts it | Beta blocker, 3–5 h. Open PR #433 places the show on a second display when one is attached. This change does not |
-| Swap displays | yes | no | Still open on #433 |
+| Placed on the presenter's display automatically, show on the projector | yes | yes: the saved show display is used for full-screen shows; Presenter View restores its saved placement or uses another display | On Wayland, the compositor controls window placement and stacking |
+| Swap displays | yes | yes: moves the audience show and Presenter View and saves the show display | On Wayland, the compositor controls Presenter View placement |
 | Pen, laser, black screen, zoom from presenter view | yes | Black, White and Zoom buttons; the audience zoom is framed on the presenter slide | Pen and laser are driven from the audience window only; the presenter window does not move the laser dot |
 | See all slides from presenter view | yes | yes: All slides (or G) opens the grid in presenter view only, the audience keeps the slide; click a thumbnail to go there, Esc closes it | |
 | Rehearse with Coach (Speaker Coach) | yes (cloud) | no | AI dimension |
