@@ -13,7 +13,7 @@ use deckcraft_geom::{Point, Rect, Xfrm};
 use deckcraft_model::{ShapeId, ShapeKind};
 use serde_json::{Value, json};
 
-use super::*;
+use super::{CommandSpec, bad, cmd, has_selection, id_param, str_param, targets, xfrm_of};
 use crate::{Result, Session};
 
 /// Smallest box or image side a crop gesture leaves, in points.
