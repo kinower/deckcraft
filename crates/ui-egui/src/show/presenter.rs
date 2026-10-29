@@ -1,7 +1,7 @@
 use super::keys::keyboard;
 use super::render::{fit, next_rect};
 use super::zoom::{Zoom, grid_indices, paint_grid, see_all_hit, slide_aspect, toggle_blank, zoom_frame};
-use super::*;
+use super::{Align2, Color32, CornerRadius, Presentation, Rect, RenderOpts, Sense, Show, Stroke, Ui, pos2, show_fills_screen, theme, vec2};
 
 pub(super) const PRESENTER_SIZE: [f32; 2] = [1100.0, 700.0];
 
