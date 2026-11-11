@@ -118,6 +118,7 @@ impl SlideApp {
             ime_settles_seen: 0,
             ime_interrupt_pending: false,
             ime_reset: HashMap::new(),
+            displays: crate::displays::Displays::default(),
         }
     }
 
@@ -365,7 +366,7 @@ impl SlideApp {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
         if let Some(t) = self.pending_copy.take() {
-            ctx.copy_text(t);
+            self.offer_system_clipboard(&ctx, t);
         }
         self.drain_requests();
         doc_window::show(self, &ctx);

@@ -20,6 +20,7 @@ pub mod canvas;
 pub mod capture;
 pub mod control;
 pub mod dialogs;
+pub mod displays;
 pub mod doc_window;
 pub mod eyedropper;
 pub mod icons;
@@ -298,7 +299,7 @@ pub struct SlideApp {
     #[cfg(not(target_arch = "wasm32"))]
     updates_rt: updates_ui::Runtime,
     /// Text for the system clipboard from a Copy or Cut command, handed over on the next frame.
-    pending_copy: Option<String>,
+    pending_copy: Option<(String, String, Option<Vec<u8>>)>,
     /// Bounded screenshot completion slots for the control channel (egui 0.37 callbacks).
     capture: capture::Capture,
     styled: bool,
@@ -338,6 +339,8 @@ pub struct SlideApp {
     /// The empty presentation host mode starts with ([`SlideApp::start_for_host`]), until the
     /// first file the page sends takes its place.
     host_start: Option<u64>,
+    /// The displays, kept current by the desktop app; empty where it cannot tell ([`displays`]).
+    pub displays: displays::Displays,
     /// Owner/generation/cause bookkeeping for the canvas text IME producer.
     ime_tracker: egui::ime_context::ImeContextTracker,
     /// Canvas IME geometry for this pass: the caret while editing, or the selected shape.
