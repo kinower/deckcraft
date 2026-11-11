@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod clipboard;
 pub mod cmd;
 pub mod compare;
 pub mod connect;
@@ -457,7 +458,7 @@ pub struct MediaStatus {
 /// The theme a copy drew with. The colours and the map stay apart, as in
 /// `deckcraft_model::resolve::Ctx::color`: the map renames only `tx1`, `bg1`, `tx2` and `bg2`, and
 /// a direct `dk1` keeps the theme's colour.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceTheme {
     /// The theme's own colours, no colour map applied.
     pub colors: deckcraft_color::ColorScheme,
@@ -465,7 +466,7 @@ pub struct SourceTheme {
     pub fonts: deckcraft_model::theme::FontScheme,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Clipboard {
     pub shapes: Vec<Shape>,
     /// The copied placeholders as they were, by id. `shapes` holds a slide's placeholders as
@@ -478,8 +479,18 @@ pub struct Clipboard {
     pub plain: String,
     /// The theme the shapes were copied under, for Paste Special › Keep Source Formatting.
     pub source_theme: Option<SourceTheme>,
+    /// Source layout name and kind for each copied slide, for destination-theme matching.
+    #[serde(default)]
+    pub slide_layouts: Vec<(String, deckcraft_model::LayoutType)>,
+    /// Slides from another process use the destination theme and layouts.
+    #[serde(skip)]
+    pub foreign: bool,
     /// How many times the shapes were pasted (each paste offsets further).
+    #[serde(skip)]
     pub pastes: u32,
+    /// Cached system representation used to recognize repeated offers.
+    #[serde(skip)]
+    pub system_bytes: Option<Vec<u8>>,
 }
 
 pub struct Session {
@@ -597,25 +608,40 @@ impl Session {
     pub fn set_active(&mut self, i: usize) {
         let was = self.active().map(|d| d.uid);
         if i < self.docs.len() {
+            let before = self.active_uid();
+            if before != self.docs.get(i).map(|d| d.uid) {
+                self.end_crop_drag();
+            }
             self.active = Some(i);
+            self.document_changed(before);
         }
         self.forget_vertex_kind_unless(was);
     }
     pub fn add_document(&mut self, d: DocState) -> usize {
-        let was = self.active().map(|d| d.uid);
+        let before = self.active_uid();
+        self.end_crop_drag();
         self.docs.push(d);
         self.active = Some(self.docs.len() - 1);
-        self.forget_vertex_kind_unless(was);
+        self.document_changed(before);
+        self.forget_vertex_kind_unless(before);
         self.docs.len() - 1
     }
     pub fn close_document(&mut self, i: usize) {
         let was = self.active().map(|d| d.uid);
         if i < self.docs.len() {
+            let before = self.active_uid();
+            // The presentation that takes index `i` (or the last one) becomes active, even when
+            // `i` wasn't: a crop drag ends wherever the active presentation changes.
+            let next = self.docs.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, d)| d.uid).nth(i.min(self.docs.len().saturating_sub(2)));
+            if next != before {
+                self.end_crop_drag();
+            }
             let d = self.docs.remove(i);
             if let Some(dir) = &self.recovery_dir {
                 recovery::discard(dir, d.uid);
             }
             self.active = if self.docs.is_empty() { None } else { Some(i.min(self.docs.len() - 1)) };
+            self.document_changed(before);
         }
         self.forget_vertex_kind_unless(was);
     }
@@ -625,6 +651,18 @@ impl Session {
         if self.active().map(|d| d.uid) != was {
             self.tool.vertex_kind = None;
         }
+    }
+    fn active_uid(&self) -> Option<u64> {
+        self.active().map(|d| d.uid)
+    }
+    /// Crop mode belongs to a picture in one presentation: another one becoming active ends it,
+    /// so coming back doesn't bring it back.
+    fn document_changed(&mut self, before: Option<u64>) {
+        if self.active_uid() != before {
+            self.tool.crop = None;
+            self.tool.drop_crop_drag();
+        }
+        self.settle_crop();
     }
     pub fn next_untitled(&mut self) -> String {
         self.untitled += 1;
@@ -680,6 +718,7 @@ impl Session {
         if let Some(st) = self.active_mut() {
             clamp_selection(st);
         }
+        self.settle_crop();
         if let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
             && st.uid == uid
             && !Arc::ptr_eq(&old, &st.doc)
@@ -789,6 +828,7 @@ impl Session {
         if st.composition.is_some() && owner(&st.selection) != before {
             self.settle_composition();
         }
+        self.settle_crop();
         Ok(())
     }
 }

@@ -27,6 +27,7 @@ mod logging;
 mod pasteboard;
 
 use deckcraft_engine::Session;
+use deckcraft_ui_egui::displays::{Display, Displays};
 use deckcraft_ui_egui::{Services, SlideApp};
 
 struct App(
@@ -46,7 +47,28 @@ impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.0.raw_input_hook(ctx, raw);
     }
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // The slide show and Presenter View choose their displays from these.
+        if let Some(w) = frame.winit_window() {
+            let list: Vec<_> = w.available_monitors().collect();
+            let (current, primary) = (w.current_monitor(), w.primary_monitor());
+            self.0.displays = Displays {
+                editor: list.iter().position(|m| Some(m) == current.as_ref()),
+                primary: list.iter().position(|m| Some(m) == primary.as_ref()),
+                list: list
+                    .iter()
+                    .map(|m| {
+                        let (at, size) = (m.position(), m.size());
+                        Display {
+                            x: at.x,
+                            y: at.y,
+                            w: i32::try_from(size.width).unwrap_or(i32::MAX),
+                            h: i32::try_from(size.height).unwrap_or(i32::MAX),
+                        }
+                    })
+                    .collect(),
+            };
+        }
         self.0.ui(ui);
     }
     fn on_exit(&mut self) {
@@ -138,6 +160,10 @@ fn services(native_wayland: bool) -> Services {
         clipboard_image: pasteboard.then(|| Box::new(pasteboard::image_png) as Box<dyn FnMut() -> Option<Vec<u8>>>),
         clipboard_html: pasteboard.then(|| Box::new(pasteboard::html) as Box<dyn FnMut() -> Option<String>>),
         clipboard_set_html: pasteboard.then(|| Box::new(pasteboard::set_html) as Box<dyn FnMut(&str, &str) -> bool>),
+        #[cfg(target_os = "windows")]
+        clipboard_native: pasteboard.then(|| Box::new(pasteboard::native) as Box<dyn FnMut() -> Option<Vec<u8>>>),
+        #[cfg(target_os = "windows")]
+        clipboard_set_native: pasteboard.then(|| Box::new(pasteboard::set_native) as Box<dyn FnMut(&[u8], &str, &str) -> bool>),
         // Media is mixed and clocked by the output device; `DECKCRAFT_NO_AUDIO` plays silently.
         audio_out: std::env::var_os("DECKCRAFT_NO_AUDIO")
             .is_none()
