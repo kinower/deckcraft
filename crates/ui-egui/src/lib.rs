@@ -341,6 +341,8 @@ pub struct SlideApp {
     host_start: Option<u64>,
     /// The displays, kept current by the desktop app; empty where it cannot tell ([`displays`]).
     pub displays: displays::Displays,
+    /// Restore the editor window after a show on another display.
+    editor_restore: Option<displays::EditorRestore>,
     /// Owner/generation/cause bookkeeping for the canvas text IME producer.
     ime_tracker: egui::ime_context::ImeContextTracker,
     /// Canvas IME geometry for this pass: the caret while editing, or the selected shape.

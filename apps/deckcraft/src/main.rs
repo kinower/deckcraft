@@ -48,26 +48,35 @@ impl eframe::App for App {
         self.0.raw_input_hook(ctx, raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        // The slide show and Presenter View choose their displays from these.
-        if let Some(w) = frame.winit_window() {
-            let list: Vec<_> = w.available_monitors().collect();
-            let (current, primary) = (w.current_monitor(), w.primary_monitor());
-            self.0.displays = Displays {
-                editor: list.iter().position(|m| Some(m) == current.as_ref()),
-                primary: list.iter().position(|m| Some(m) == primary.as_ref()),
-                list: list
-                    .iter()
-                    .map(|m| {
-                        let (at, size) = (m.position(), m.size());
-                        Display {
-                            x: at.x,
-                            y: at.y,
-                            w: i32::try_from(size.width).unwrap_or(i32::MAX),
-                            h: i32::try_from(size.height).unwrap_or(i32::MAX),
-                        }
-                    })
-                    .collect(),
-            };
+        // The slide show and Presenter View choose their displays from these. They are read when
+        // Set Up Slide Show opens and when a show starts, not every frame (winit 0.30 sends no event
+        // when displays change).
+        if self.0.services.displays.is_none()
+            && let Some(window) = frame.winit_window()
+        {
+            let window = std::sync::Arc::downgrade(window);
+            self.0.services.displays = Some(Box::new(move || {
+                let w = window.upgrade()?;
+                let list: Vec<_> = w.available_monitors().collect();
+                let (current, primary) = (w.current_monitor(), w.primary_monitor());
+                Some(Displays {
+                    editor: list.iter().position(|m| Some(m) == current.as_ref()),
+                    primary: list.iter().position(|m| Some(m) == primary.as_ref()),
+                    list: list
+                        .iter()
+                        .map(|m| {
+                            let (at, size) = (m.position(), m.size());
+                            Display {
+                                name: m.name(),
+                                x: at.x,
+                                y: at.y,
+                                w: i32::try_from(size.width).unwrap_or(i32::MAX),
+                                h: i32::try_from(size.height).unwrap_or(i32::MAX),
+                            }
+                        })
+                        .collect(),
+                })
+            }));
         }
         self.0.ui(ui);
     }
@@ -320,7 +329,7 @@ fn main() -> eframe::Result {
             // Presenter View asks winit how many displays there are when a show starts.
             #[cfg(all(unix, not(target_os = "macos")))]
             if let Some(window) = cc.winit_window().cloned() {
-                app.services.displays = Some(Box::new(move || display_count(&window)));
+                app.services.display_count = Some(Box::new(move || display_count(&window)));
             }
             load_prefs(&mut app);
             app.enable_update_checks();
