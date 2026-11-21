@@ -240,11 +240,11 @@ pub(super) fn presenter_window(
         // another display, and beside a show browsed in a window, it is an ordinary window.
         // On Wayland, set_outer_position and set_window_level are unsupported: the
         // compositor chooses Presenter View's display and stacking order instead.
-        egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size(PRESENTER_SIZE).with_window_level(presenter_level(
-            show.reading,
-            &doc.show.show_type,
-            presenter_apart(show, displays),
-        )),
+        egui::ViewportBuilder::default()
+            .with_title("Presenter View — DeckCraft")
+            .with_inner_size(PRESENTER_SIZE)
+            .with_min_inner_size([480.0, 280.0])
+            .with_window_level(presenter_level(show.reading, &doc.show.show_type, presenter_apart(show, displays))),
         |ui, _| {
             if !keyboard(ui.ctx(), show, doc, now, true) {
                 *keep = false;
@@ -328,7 +328,15 @@ pub(super) fn presenter_window(
                     }
                     return;
                 }
-                let top = avail.min.y + avail.height() * 0.62;
+                // An embedded/constrained host can be smaller than the native window minimum.
+                // Prioritize the scrollable notes there; bracket keys still adjust their size.
+                if avail.height() < 120.0 {
+                    notes_area(ui, notes, show.notes_px, avail);
+                    return;
+                }
+                // Keep the notes readable when the presenter window is short; the previews give
+                // up height before the notes header, padding and scroll viewport do.
+                let top = avail.min.y + (avail.height() * 0.62).min((avail.height() - 120.0).max(0.0));
                 let left = Rect::from_min_max(avail.min, pos2(avail.min.x + avail.width() * 0.62, top));
                 let right = Rect::from_min_max(pos2(left.max.x + 16.0, avail.min.y), pos2(avail.max.x, top));
                 let cr = fit(left, doc);
@@ -383,12 +391,7 @@ pub(super) fn presenter_window(
                 });
                 // Black on white, like a printed page, for reading at a glance.
                 let notes_rect = Rect::from_min_max(pos2(avail.min.x, notes_head.max.y + 4.0), avail.max);
-                ui.painter().rect_filled(notes_rect, CornerRadius::same(4), Color32::WHITE);
-                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect.shrink(12.0)));
-                egui::ScrollArea::vertical().show(&mut child, |ui| {
-                    ui.set_width(ui.available_width());
-                    presenter_notes(ui, notes, show.notes_px);
-                });
+                notes_area(ui, notes, show.notes_px, notes_rect);
             });
             if ui.input(|i| i.viewport().close_requested()) {
                 show.presenter = false;
@@ -402,6 +405,17 @@ pub(super) fn presenter_window(
             *keep = false;
         }
     }
+}
+
+/// A notes viewport whose inset stays usable below the native window minimum.
+fn notes_area(ui: &mut Ui, notes: &deckcraft_model::text::TextBody, px: f32, rect: Rect) {
+    ui.painter().rect_filled(rect, CornerRadius::same(4), Color32::WHITE);
+    let inset = vec2((rect.width().max(0.0) * 0.25).min(12.0), (rect.height().max(0.0) * 0.25).min(12.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(inset)));
+    egui::ScrollArea::vertical().show(&mut child, |ui| {
+        ui.set_width(ui.available_width());
+        presenter_notes(ui, notes, px);
+    });
 }
 
 /// The current slide's notes in the presenter's notes pane, `px` for 12 pt text.
