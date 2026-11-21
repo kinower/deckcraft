@@ -406,7 +406,7 @@ pub(super) fn presenter_window(
 
 /// The current slide's notes in the presenter's notes pane, `px` for 12 pt text.
 pub(super) fn presenter_notes(ui: &mut Ui, notes: &deckcraft_model::text::TextBody, px: f32) -> egui::Response {
-    let color = Color32::from_gray(230);
+    let color = Color32::BLACK;
     if notes.text().is_empty() {
         ui.label(egui::RichText::new("No notes.").size(px).color(color))
     } else {
