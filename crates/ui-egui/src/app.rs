@@ -119,7 +119,44 @@ impl SlideApp {
             ime_settles_seen: 0,
             ime_interrupt_pending: false,
             ime_reset: HashMap::new(),
+            displays: crate::displays::Displays::default(),
+            editor_restore: None,
         }
+    }
+
+    pub fn refresh_displays(&mut self) {
+        if let Some(read) = self.services.displays.as_mut()
+            && let Some(displays) = read()
+        {
+            self.displays = displays;
+        }
+    }
+
+    fn restore_editor(&mut self, ctx: &egui::Context) {
+        use crate::displays::RestoreStep;
+        let Some(restore) = self.editor_restore.as_mut() else { return };
+        let ppp = ctx.pixels_per_point();
+        let points = |px: i32| px as f32 / ppp;
+        let (fullscreen, at) = ctx.input(|i| {
+            let v = i.viewport();
+            let at = v.outer_rect.map(|r| [(r.min.x * ppp).round() as i32, (r.min.y * ppp).round() as i32]);
+            (v.fullscreen == Some(true), at)
+        });
+        let command = match restore.next(fullscreen, at) {
+            None => {
+                self.editor_restore = None;
+                return;
+            }
+            Some(RestoreStep::Wait) => None,
+            Some(RestoreStep::LeaveFullScreen) => Some(egui::ViewportCommand::Fullscreen(false)),
+            Some(RestoreStep::Move([x, y])) => Some(egui::ViewportCommand::OuterPosition(egui::pos2(points(x), points(y)))),
+            Some(RestoreStep::Size([w, h])) => Some(egui::ViewportCommand::InnerSize(egui::vec2(points(w), points(h)))),
+            Some(RestoreStep::Maximize) => Some(egui::ViewportCommand::Maximized(true)),
+        };
+        if let Some(command) = command {
+            ctx.send_viewport_cmd(command);
+        }
+        ctx.request_repaint();
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
@@ -306,6 +343,9 @@ impl SlideApp {
         canvas::trackpad_twist(self, &ctx);
         eyedropper::tick(self, &ctx);
         self.opening_ui(&ctx);
+        if self.show.is_none() {
+            self.restore_editor(&ctx);
+        }
         if self.show.is_some() {
             self.anim_preview = None;
             show::ui(self, ui);
@@ -366,7 +406,7 @@ impl SlideApp {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
         if let Some(t) = self.pending_copy.take() {
-            ctx.copy_text(t);
+            self.offer_system_clipboard(&ctx, t);
         }
         self.drain_requests();
         doc_window::show(self, &ctx);

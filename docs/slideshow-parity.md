@@ -42,7 +42,7 @@ ready** (estimated), **10–16 h** to parity.
 
 | Feature | PowerPoint | DeckCraft | Notes |
 |---|---|---|---|
-| Separate presenter window with current slide, next slide, notes | yes | yes (an egui viewport, 1100×700); the notes keep their bullets, numbers, indents and bold/italic, as in the notes pane | On Linux and the BSDs it stays off if winit lists exactly one display as the show starts, as in PowerPoint: on one display it covered the show, and the hidden window stalled every frame (#1156). If winit lists none, the setting is kept. There is not yet a way to switch to Presenter View by hand during a one-display show. macOS, Windows and the browser are unchanged |
+| Separate presenter window with current slide, next slide, notes | yes | yes: preview slides above full-width black-on-white notes; rich-text formatting and A-/A+ controls retained | Personal 0.18.1 backport: monitor selection, stable saved display identity, named displays, delayed presenter placement, bounded fullscreen swap, and editor restoration from #1225; independent notes layout from #2290. Automatic prefers another display. The window fits the target display and stays at normal level when it has a display of its own. Native physical two-display/hot-unplug validation remains outstanding |
 | Elapsed timer | yes | yes | |
 | Pause / reset timer, clock | yes | yes: Pause/Resume and Reset in presenter view (T pauses, R resets); the clock is local time, `--:--` where there is no clock | Pausing the timer does not pause the show, animations or rehearsal |
 | Slide counter, previous/next/end buttons | yes | yes | |
